@@ -1,93 +1,138 @@
-mod state_bridge;
 mod utils;
 
-use crate::state_bridge::{call_method1, StateCell};
-use js_sys::{Object, Set};
-use svelte_state_macros::SvelteStateModel;
-use std::cell::RefCell;
+use js_sys::{Array, Object, Reflect};
+use rand_chacha::ChaCha8Rng;
+use rand_core::{RngCore, SeedableRng};
+use svelte_store::Readable;
+use voronator::{delaunator::Point, VoronoiDiagram};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 
+#[wasm_bindgen(typescript_custom_section)]
+const TYPESCRIPT_TYPES: &str = r#"
+import type { Readable } from "svelte/store";
+
+export interface GameOptions {
+  numCells: number;
+  rngSeed: number;
+}
+
+export interface MapCell {
+    isExplored: boolean,
+    isVoid: boolean,
+    vertices: Array<[number, number]>,
+}
+"#;
+
+#[wasm_bindgen]
+pub struct GameState {
+    cells: Readable<Array>,
+    num_cells: u64,
+    rng_seed: u64,
+}
+
 #[wasm_bindgen]
 extern "C" {
-    fn alert(s: &str);
+    #[wasm_bindgen(typescript_type = "GameOptions")]
+    pub type GameOptions;
+
+    #[wasm_bindgen(typescript_type = "MapCell")]
+    pub type MapCell;
+
+    #[wasm_bindgen(typescript_type = "Readable<Array<MapCell>>")]
+    pub type MapCells;
+}
+
+impl MapCell {
+    fn new(vertices: &Array, is_explored: bool, is_void: bool) -> Result<MapCell, JsValue> {
+        let map_cell = Object::new();
+        Reflect::set(
+            map_cell.as_ref(),
+            &JsValue::from_str("isExplored"),
+            &JsValue::from_bool(is_explored),
+        )?;
+        Reflect::set(
+            map_cell.as_ref(),
+            &JsValue::from_str("isVoid"),
+            &JsValue::from_bool(is_void),
+        )?;
+        Reflect::set(
+            map_cell.as_ref(),
+            &JsValue::from_str("vertices"),
+            &vertices.clone().into(),
+        )?;
+
+        Ok(map_cell.unchecked_into::<MapCell>())
+    }
 }
 
 #[wasm_bindgen]
-pub fn greet() {
-    alert("Hello, back!");
-}
-
-#[wasm_bindgen]
-#[derive(SvelteStateModel)]
-pub struct CounterState {
-    #[svelte_state(state_object)]
-    state_object: Option<Object>,
-
-    #[svelte_state(key = "counter", default = 0.0)]
-    counter: StateCell<f64>,
-
-    #[svelte_state(key = "counter2", default = 0.0)]
-    counter2: StateCell<f64>,
-
-    #[svelte_state(key = "set", default = js_sys::Set::new(&JsValue::UNDEFINED))]
-    set: StateCell<Set>,
-
-    #[svelte_state(default)]
-    local_only_counter: RefCell<i64>,
-}
-
-#[wasm_bindgen]
-impl CounterState {
+impl GameState {
     #[wasm_bindgen(constructor)]
-    pub fn new(state_object: Option<JsValue>) -> Result<CounterState, JsValue> {
-        let state_object = match state_object {
-            Some(value) => Some(value.dyn_into::<Object>().map_err(|_| {
-                JsValue::from_str("CounterState constructor expects a plain object when provided")
-            })?),
-            None => None,
-        };
+    pub fn new(options: GameOptions) -> Result<GameState, JsValue> {
+        let options: Object = options
+            .dyn_into::<Object>()
+            .map_err(|_| JsValue::from_str("GameState constructor expects a plain object"))?;
 
-        CounterState::build_from_state_object(state_object)
+        let num_cells = Reflect::get(options.as_ref(), &JsValue::from_str("numCells"))?
+            .as_f64()
+            .unwrap() as u64;
+        let rng_seed = Reflect::get(options.as_ref(), &JsValue::from_str("rngSeed"))?
+            .as_f64()
+            .unwrap() as u64;
+
+        Ok(GameState {
+            cells: Readable::new(Array::new()),
+            num_cells: num_cells,
+            rng_seed: rng_seed,
+        })
     }
 
-    #[wasm_bindgen(getter, js_name = stateObject)]
-    pub fn state_object(&self) -> JsValue {
-        self.state_object
-            .as_ref()
-            .map(|value| value.clone().into())
-            .unwrap_or(JsValue::UNDEFINED)
+    #[wasm_bindgen(getter, js_name = cells)]
+    pub fn cells_store(&self) -> MapCells {
+        self.cells.get_store().into()
     }
 
-    #[wasm_bindgen(getter)]
-    pub fn counter(&self) -> Result<f64, JsValue> {
-        self.counter.get()
-    }
+    pub fn generate_map(&mut self) -> Result<JsValue, JsValue> {
+        let requested_cell_count = self.num_cells;
+        let output_cells = Array::new();
+        let mut rng = ChaCha8Rng::seed_from_u64(self.rng_seed);
+        let points: Vec<(f64, f64)> = (0..requested_cell_count)
+            .map(|_| {
+                (
+                    next_unit_f64(&mut rng) * 100.0,
+                    next_unit_f64(&mut rng) * 100.0,
+                )
+            })
+            .collect();
 
-    #[wasm_bindgen(getter)]
-    pub fn counter2(&self) -> Result<f64, JsValue> {
-        self.counter2.get()
-    }
+        if let Some(diagram) =
+            VoronoiDiagram::<Point>::from_tuple(&(0.0, 0.0), &(100.0, 100.0), &points)
+        {
+            for polygon in diagram.cells() {
+                let polygon_points = Array::new();
+                for point in polygon.points() {
+                    let point_pair = Array::new();
+                    point_pair.push(&JsValue::from_f64(point.x));
+                    point_pair.push(&JsValue::from_f64(point.y));
+                    polygon_points.push(&point_pair.into());
+                }
+                let map_cell = MapCell::new(&polygon_points, false, false)?;
+                output_cells.push(map_cell.as_ref());
+            }
+        } else {
+            return Err(JsValue::from_str(&format!(
+                "Voronoi generation failed: size/seed combo isn't viable (numCells={}, rngSeed={})",
+                requested_cell_count, self.rng_seed
+            )));
+        }
 
-    pub fn add_to_counter(&self, amount: f64) -> Result<f64, JsValue> {
-        self.counter.update(|value| value + amount)
+        self.cells.set(output_cells.clone());
+        Ok(output_cells.into())
     }
+}
 
-    pub fn add_to_counter2(&self, amount: f64) -> Result<f64, JsValue> {
-        self.counter2.update(|value| value + amount)
-    }
-
-    pub fn add_to_set(&self, value: f64) -> Result<u32, JsValue> {
-        let set = self.set.get()?;
-        let set_value: JsValue = set.clone().into();
-        call_method1(&set_value, "add", &JsValue::from_f64(value))?;
-        self.set.set(set.clone())?;
-        Ok(set.size())
-    }
-
-    pub fn add_to_local_only_counter(&self, amount: i64) -> i64 {
-        let mut current = self.local_only_counter.borrow_mut();
-        *current += amount;
-        *current
-    }
+fn next_unit_f64(rng: &mut impl RngCore) -> f64 {
+    let value = rng.next_u64() >> 11;
+    (value as f64) * (1.0 / ((1u64 << 53) as f64))
 }

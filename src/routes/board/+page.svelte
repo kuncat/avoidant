@@ -1,55 +1,69 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import init, { CounterState } from "$lib/wasm-pkg/avoidant.js";
-  import { SvelteSet } from "svelte/reactivity";
+  import init, { GameState } from "$lib/wasm-pkg/avoidant.js";
 
-  class UiState {
-    counter: number;
-    counter2: { value: number };
-    set: SvelteSet<number>;
-    testText: string;
-
-    constructor() {
-      this.counter = $state(0);
-      this.counter2 = $state({ value: 0 });
-      this.set = new SvelteSet([1, 2, 3]);
-      this.testText = 'Svelte object reference is passed into Rust and mutated there.';
-    }
-  }
-
-  let uiState = new UiState();
-  let counterState = $state<CounterState | undefined>(undefined);
+  let isLoading = $state(true);
+  let gameState = $state<GameState | undefined>(undefined);
+  let cells = $derived(gameState?.cells);
+  let numCellsInput = $state(160);
+  let rngSeedInput = $state(999);
 
   onMount(async () => {
     await init();
-    counterState = new CounterState(uiState);
+    isLoading = false;
   });
+
+  $effect(() => {
+    console.log($state.snapshot($cells));
+  });
+
+  function startGame() {
+    try {
+      gameState = new GameState({
+        numCells: $state.snapshot(numCellsInput),
+        rngSeed: $state.snapshot(rngSeedInput),
+      });
+      gameState.generate_map();
+    } catch (error) {
+      console.error("Failed to start game", error);
+    }
+  }
 </script>
 
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<div class="border border-gray-400 max-w-lg rounded p-4 fixed top-4 left-4 bg-white">
+  <h1>Avoidant</h1>
 
-<button class="primary-action" type="button" onclick={() => counterState?.add_to_counter(3)} disabled={!counterState}>
-  Change number
-</button>
+  {#if isLoading}
+    <p>Loading...</p>
+  {:else if (!gameState)}
+    <form class="w-full max-w-lg">
+      <div class="flex flex-wrap -mx-3 mb-2">
+        <div class="w-full md:w-1/2 px-3 mb-6 md:mb-0">
+          <label class="block uppercase tracking-wide text-gray-700 text-xs font-bold mb-2" for="grid-first-name">
+            Size
+          </label>
+          <input class="appearance-none block w-full bg-gray-200 text-gray-700 border rounded py-3 px-4 mb-3 leading-tight focus:outline-none focus:bg-white" id="grid-first-name" type="number" inputmode="numeric" bind:value={numCellsInput} min="100" max="4096" step="1">
+        </div>
+        <div class="w-full md:w-1/2 px-3">
+          <label class="block uppercase tracking-wide text-gray-700 text-xs font-bold mb-2" for="grid-last-name">
+            RNG Seed
+          </label>
+          <input class="appearance-none block w-full bg-gray-200 text-gray-700 border border-gray-200 rounded py-3 px-4 leading-tight focus:outline-none focus:bg-white focus:border-gray-500" id="grid-last-name" type="number" inputmode="numeric" bind:value={rngSeedInput} min="0">
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button class="bg-teal-500 hover:bg-teal-700 border-teal-500 hover:border-teal-700 text-sm border-4 text-white py-1 px-2 rounded" type="button" onclick={startGame}>
+          Start Game
+        </button>
+      </div>
+    </form>
+  {/if}
+</div>
 
-<button class="primary-action" type="button" onclick={() => counterState?.add_to_counter2(2)} disabled={!counterState}>
-  Change number 2
-</button>
-
-<button class="primary-action" type="button" onclick={() => counterState?.add_to_set(Date.now())} disabled={!counterState}>
-  Add num Rust
-</button>
-
-<!-- <button class="primary-action" type="button" onclick={() => uiState.set.add(Date.now())} disabled={!counterState}>
-  Add num JS
-</button> -->
-
-<p class="wasm-counter">Counter: {uiState.counter}</p>
-<p class="wasm-counter">Counter 2: {uiState.counter2.value}</p>
-<p class="wasm-counter">Set size: {uiState.set.size}</p>
-<p class="wasm-note">{uiState.testText}</p>
-<p>{#each uiState.set as num, index (index)}
-  {num}, 
-{/each}
-</p>
+<div class="w-full h-screen p-2">
+  <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="stroke-teal-500 w-full h-full border border-gray-300 bg-white">
+    {#each $cells as cell, idx (idx)}
+      <polygon points={cell.vertices.map(([x, y]) => `${x},${y}`).join(" ")} fill="none" stroke-width="0.35" />
+    {/each}
+  </svg>
+</div>

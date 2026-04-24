@@ -26,7 +26,7 @@ npm run dev -- --open
 ### WASM
 
 ```
-wasm-pack build --target web --out-dir src/lib/wasm-pkg
+npm run build:wasm
 ```
 
 ### App
