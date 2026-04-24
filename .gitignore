@@ -24,3 +24,11 @@ vite.config.ts.timestamp-*
 # Paraglide
 src/lib/paraglide
 project.inlang/cache/
+
+
+/target
+**/*.rs.bk
+Cargo.lock
+bin/
+src/lib/wasm-pkg
+wasm-pack.log

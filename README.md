@@ -1,26 +1,18 @@
-# sv
-
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
-
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.15.1 create --template minimal --types ts --add prettier eslint vitest="usages:unit,component" tailwindcss="plugins:typography,forms" sveltekit-adapter="adapter:static" paraglide="languageTags:en+demo:yes" --install npm avoidant
-```
+# Avoidant
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+### Prerequisites
+
+wasm-pack
+
+```sh
+cargo install wasm-pack
+```
+
+### Running
+
+Install dependencies with `npm install` then start a development server:
 
 ```sh
 npm run dev
@@ -31,7 +23,13 @@ npm run dev -- --open
 
 ## Building
 
-To create a production version of your app:
+### WASM
+
+```
+wasm-pack build --target web --out-dir src/lib/wasm-pkg
+```
+
+### App
 
 ```sh
 npm run build
@@ -39,4 +37,10 @@ npm run build
 
 You can preview the production build with `npm run preview`.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Testing
+
+### WASM Headless Browser test
+
+```
+wasm-pack test --headless --firefox
+```
