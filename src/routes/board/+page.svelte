@@ -30,7 +30,7 @@
   }
 </script>
 
-<div class="border border-gray-400 max-w-lg rounded p-4 fixed top-4 left-4 bg-white">
+<div class="border border-gray-400 max-w-lg rounded p-4 fixed top-4 left-4 bg-white" class:opacity-50={gameState}>
   <h1>Avoidant</h1>
 
   {#if isLoading}
