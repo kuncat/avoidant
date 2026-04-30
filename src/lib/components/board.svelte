@@ -1,5 +1,11 @@
+<script module lang="ts">
+  export const MAX_PULSES = 16;
+  export const fragmentShader = `#define MAX_PULSES ${MAX_PULSES}\n` + _fragmentShader;
+  const PULSE_DURATION = 250;
+</script>
+
 <script lang="ts">
-  import fragmentShader from "./fragment.glsl?raw";
+  import _fragmentShader from "./fragment.glsl?raw";
   import vertexShader from "./vertex.glsl?raw";
   import type { GameState, MapCell } from "$lib/wasm-pkg/avoidant";
   import { T } from "@threlte/core";
@@ -7,6 +13,9 @@
   import { DoubleSide, Vector3 } from "three";
   import { quadOut } from "svelte/easing";
   import { Tween } from "svelte/motion";
+  import { SvelteSet } from "svelte/reactivity";
+
+  interactivity();
 
   interface Props {
     gameState: GameState;
@@ -62,12 +71,40 @@
     return edgeTriangles;
   }
 
-  interactivity();
-  const pulsePosition = new Vector3();
-  let pulsedCellIndex = $state<number | undefined>(undefined);
-  const pulseTimer = new Tween(0, {
-    easing: quadOut,
-  });
+  class Pulse {
+    originCell: number;
+    position: Vector3;
+    timer = new Tween(0, {
+      easing: quadOut,
+    });
+    constructor(originCell: number, position: Vector3) {
+      this.originCell = originCell;
+      this.position = position;
+    }
+
+    start() {
+      this.timer.set(0, { duration: 0 }).then(() => {
+        this.timer.set(1, { duration: PULSE_DURATION }).then(() => {
+          gameState.exploreCell(this.originCell);
+          pulses.delete(this);
+        });
+      });
+    }
+
+    static null() {
+      return new Pulse(-1, new Vector3());
+    }
+  }
+  const pulses = new SvelteSet<Pulse>();
+  const pulsesArray = $derived(
+    Array.from(pulses)
+      .reverse()
+      .slice(0, MAX_PULSES)
+      .concat(Array(Math.max(0, MAX_PULSES - pulses.size)).fill(Pulse.null())),
+  );
+  let pulseTimersUniform = $derived(pulsesArray.map((p) => p.timer.current));
+  let pulsePositionsUniform = $derived(pulsesArray.map((p) => p.position));
+  let pulseOriginCellsUniform = $derived(pulsesArray.map((p) => p.originCell));
 </script>
 
 <T.Group>
@@ -78,15 +115,9 @@
     {#if trianglePositions.length > 0}
       <T.Mesh
         onclick={(event: { point: Vector3 }) => {
-          console.log("Cell clicked:", cellIndex, $state.snapshot(cell.isExplored));
-          pulsedCellIndex = cellIndex;
-          pulsePosition.copy(event.point);
-          pulseTimer.set(0, { duration: 0 }).then(() => {
-            pulseTimer.set(1, { duration: 2000 }).then(() => {
-              gameState.exploreCell(cellIndex);
-              pulsedCellIndex = undefined;
-            });
-          });
+          const pulse = new Pulse(cellIndex, event.point.clone());
+          pulses.add(pulse);
+          pulse.start();
         }}
       >
         <T.BufferGeometry attach="geometry">
@@ -101,16 +132,20 @@
           {vertexShader}
           uniforms={{
             isExplored: { value: 0 },
-            isPulsedCell: { value: 0 },
             elevationMin: { value: gameState.elevationMin },
             elevationMax: { value: gameState.elevationMax },
-            pulseTimer: { value: 0 },
-            pulsePosition: { value: pulsePosition },
+            cellIndex: { value: 0 },
+            pulseCount: { value: 0 },
+            pulseTimers: { value: new Array(MAX_PULSES).fill(0) },
+            pulsePositions: { value: new Array(MAX_PULSES).fill(null).map(() => new Vector3()) },
+            pulseOriginCells: { value: new Array(MAX_PULSES).fill(-1) },
           }}
           uniforms.isExplored.value={cell.isExplored ? 1.0 : 0.0}
-          uniforms.isPulsedCell.value={cellIndex === pulsedCellIndex ? 1.0 : 0.0}
-          uniforms.pulseTimer.value={pulseTimer.current}
-          uniforms.pulsePosition.value={pulsePosition}
+          uniforms.cellIndex.value={cellIndex}
+          uniforms.pulseCount.value={pulses.size}
+          uniforms.pulseTimers.value={pulseTimersUniform}
+          uniforms.pulsePositions.value={pulsePositionsUniform}
+          uniforms.pulseOriginCells.value={pulseOriginCellsUniform}
         />
       </T.Mesh>
 
