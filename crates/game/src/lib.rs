@@ -2,13 +2,15 @@ mod utils;
 
 use bluenoise::BlueNoise;
 use js_sys::{Array, Object, Reflect};
-use rand::seq::SliceRandom;
 use rand::RngCore;
 use rand::SeedableRng;
+use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use svelte_store::Readable;
-use voronator::{delaunator::Point, VoronoiDiagram};
+use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::prelude::*;
+mod net;
+use net::NetworkNode;
 use wasm_bindgen::{JsCast, JsValue};
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -41,6 +43,7 @@ pub struct GameState {
     num_cells: u64,
     rng_seed: u64,
     max_samples: u32,
+    network_node: Option<NetworkNode>,
     slack: f32,
     spikiness: f64,
     elevation_min: f64,
@@ -86,6 +89,8 @@ impl MapCell {
 impl GameState {
     #[wasm_bindgen(constructor)]
     pub fn new(options: GameOptions) -> Result<GameState, JsValue> {
+        utils::set_panic_hook();
+
         let options: Object = options
             .dyn_into::<Object>()
             .map_err(|_| JsValue::from_str("GameState constructor expects a plain object"))?;
@@ -124,6 +129,7 @@ impl GameState {
             spikiness,
             elevation_min,
             elevation_max,
+            network_node: None,
         })
     }
 
@@ -202,6 +208,12 @@ impl GameState {
             )?;
             Ok(())
         })
+    }
+
+    #[wasm_bindgen(js_name = "inviteToGame")] // TODO: Use a better name
+    pub async fn invite(&mut self) {
+        // TODO: Check if there is already a network node
+        self.network_node = Some(NetworkNode::spawn().await.unwrap());
     }
 }
 
