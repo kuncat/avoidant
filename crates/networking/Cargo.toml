@@ -1,8 +1,12 @@
 [package]
-name = "networking"
-version = "0.1.0"
+authors = ["Alvin Ali Khaled <aakside@gmail.com>"]
+description = "The networking code for Avoidant."
 edition = "2024"
+license = "MIT OR Apache-2.0"
+name = "networking"
 publish = false
+repository = "https://github.com/aakside/avoidant"
+version = "0.1.0"
 
 [lib]
 crate-type = ["rlib"]

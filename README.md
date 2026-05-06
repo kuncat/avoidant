@@ -42,5 +42,5 @@ You can preview the production build with `npm run preview`.
 ### WASM Headless Browser test
 
 ```
-wasm-pack test --headless --firefox
+cd crates/game && wasm-pack test --headless --firefox
 ```
