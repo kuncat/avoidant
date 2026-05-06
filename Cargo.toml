@@ -1,12 +1,16 @@
 [package]
 authors = ["Alvin Ali Khaled <aakside@gmail.com>"]
 description = "The game logic for Avoidant."
-edition = "2018"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 name = "avoidant"
 publish = false
 repository = "https://github.com/aakside/avoidant"
 version = "0.1.0"
+
+[workspace]
+members = ["crates/networking"]
+default-members = ["."]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
