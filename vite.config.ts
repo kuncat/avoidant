@@ -40,6 +40,11 @@ export default defineConfig({
       },
     ],
   },
+  server: {
+    fs: {
+      allow: ["wasm-pkg"],
+    },
+  },
   worker: {
     plugins: () => [wasm()],
   },

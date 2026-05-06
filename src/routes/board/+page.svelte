@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import init, { GameState } from "$lib/wasm-pkg/avoidant";
+  import init, { GameState } from "wasm-pkg";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
   import { MOUSE } from "three";

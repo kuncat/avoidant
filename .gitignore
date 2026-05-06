@@ -30,5 +30,5 @@ project.inlang/cache/
 **/*.rs.bk
 Cargo.lock
 bin/
-src/lib/wasm-pkg
+wasm-pkg
 wasm-pack.log

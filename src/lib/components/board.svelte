@@ -7,7 +7,7 @@
 <script lang="ts">
   import _fragmentShader from "./fragment.glsl?raw";
   import vertexShader from "./vertex.glsl?raw";
-  import type { GameState, MapCell } from "$lib/wasm-pkg/avoidant";
+  import type { GameState, MapCell } from "wasm-pkg";
   import { T } from "@threlte/core";
   import { interactivity } from "@threlte/extras";
   import { DoubleSide, Vector3 } from "three";
