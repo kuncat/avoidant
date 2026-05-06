@@ -328,9 +328,9 @@ mod tests {
 
     #[test]
     fn vertex_height_is_reproducible() {
-        let h1 = vertex_height(12.345, 67.89, 4242);
-        let h2 = vertex_height(12.345, 67.89, 4242);
-        let h3 = vertex_height(12.345, 67.89, 4243);
+        let h1 = vertex_height(12.345, 67.89, 4242, 0.4, (-0.4, 0.4));
+        let h2 = vertex_height(12.345, 67.89, 4242, 0.4, (-0.4, 0.4));
+        let h3 = vertex_height(12.345, 67.89, 4243, 0.4, (-0.4, 0.4));
 
         assert_eq!(h1, h2);
         assert!((h1 - h3).abs() > f64::EPSILON);
