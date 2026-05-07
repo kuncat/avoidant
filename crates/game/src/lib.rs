@@ -173,9 +173,8 @@ pub struct GameOptions {
     elevation_max: Option<f64>,
 }
 
-#[derive(Serialize, Tsify)]
-#[tsify(into_wasm_abi)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone)]
+#[wasm_bindgen]
 pub struct Pulse {
     id: u32,
     origin_cell: usize,
@@ -183,6 +182,75 @@ pub struct Pulse {
     created_at_ms: f64,
     duration_ms: u32,
     is_remote: bool,
+}
+
+impl Pulse {
+    fn new(
+        id: u32,
+        origin_cell: usize,
+        position: [f64; 3],
+        created_at_ms: f64,
+        duration_ms: u32,
+        is_remote: bool,
+    ) -> Self {
+        Self {
+            id,
+            origin_cell,
+            position,
+            created_at_ms,
+            duration_ms,
+            is_remote,
+        }
+    }
+
+    fn null_internal() -> Self {
+        Self {
+            id: u32::MAX,
+            origin_cell: usize::MAX,
+            position: [0.0, 0.0, 0.0],
+            created_at_ms: 0.0,
+            duration_ms: 1,
+            is_remote: false,
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl Pulse {
+    #[wasm_bindgen(getter)]
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    #[wasm_bindgen(getter, js_name = "originCell")]
+    pub fn origin_cell(&self) -> usize {
+        self.origin_cell
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn position(&self) -> Vec<f64> {
+        self.position.to_vec()
+    }
+
+    #[wasm_bindgen(getter, js_name = "createdAtMs")]
+    pub fn created_at_ms(&self) -> f64 {
+        self.created_at_ms
+    }
+
+    #[wasm_bindgen(getter, js_name = "durationMs")]
+    pub fn duration_ms(&self) -> u32 {
+        self.duration_ms
+    }
+
+    #[wasm_bindgen(getter, js_name = "isRemote")]
+    pub fn is_remote(&self) -> bool {
+        self.is_remote
+    }
+
+    #[wasm_bindgen(js_name = "nullPulse")]
+    pub fn null_pulse() -> Pulse {
+        Self::null_internal()
+    }
 }
 
 #[derive(Clone)]
@@ -253,15 +321,15 @@ impl UiState {
         *next_pulse_id = next_pulse_id.wrapping_add(1);
 
         let created_at_ms = monotonic_now_ms();
-        let pulse = Pulse {
-            id: pulse_id,
+        let pulse = Pulse::new(
+            pulse_id,
             origin_cell,
-            position: [x, y, z],
+            [x, y, z],
             created_at_ms,
             duration_ms,
             is_remote,
-        };
-        let pulse = serde_wasm_bindgen::to_value(&pulse)?;
+        );
+        let pulse: JsValue = pulse.into();
         self.pulses.borrow_mut().set_with(|pulses_array| {
             pulses_array.push(pulse.as_ref());
         });

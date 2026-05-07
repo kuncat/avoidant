@@ -197,7 +197,10 @@
 
     {#if inviteTicket}
       <div class="mt-3">
-        <label class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase" for="invite-ticket">
+        <label
+          class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+          for="invite-ticket"
+        >
           Invitation Ticket
         </label>
         <input

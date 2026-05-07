@@ -7,7 +7,8 @@
   import { onMount } from "svelte";
   import _fragmentShader from "./fragment.glsl?raw";
   import vertexShader from "./vertex.glsl?raw";
-  import type { GameState, MapCell, Pulse } from "wasm-pkg";
+  import { Pulse } from "wasm-pkg";
+  import type { GameState, MapCell } from "wasm-pkg";
   import { T } from "@threlte/core";
   import { interactivity } from "@threlte/extras";
   import { DoubleSide, Vector3 } from "three";
@@ -81,19 +82,11 @@
     return edgeTriangles;
   }
 
-  const nullPulse: Pulse = {
-    id: -1,
-    originCell: -1,
-    position: [0, 0, 0],
-    createdAtMs: 0,
-    durationMs: 1,
-    isRemote: false,
-  };
   const pulsesArray = $derived(
     Array.from($pulses ?? [])
       .reverse()
       .slice(0, MAX_PULSES)
-      .concat(Array(Math.max(0, MAX_PULSES - (($pulses ?? []).length))).fill(nullPulse)),
+      .concat(Array(Math.max(0, MAX_PULSES - ($pulses ?? []).length)).fill(Pulse.nullPulse())),
   );
   let pulseTimersUniform = $derived(
     pulsesArray.map((p) => {
