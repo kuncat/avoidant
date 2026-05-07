@@ -1,12 +1,12 @@
 use std::{cell::RefCell, rc::Rc};
 
-use js_sys::{Array, Reflect};
+use js_sys::Array;
 use n0_future::time::Duration;
 use svelte_store::Readable;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::{PULSE_DURATION_MS, UiState};
+use crate::{MapCell, PULSE_DURATION_MS, UiState};
 
 const MUTATION_DELIMITER: char = '|';
 
@@ -155,11 +155,15 @@ fn mark_cell_explored(cells: &Rc<RefCell<Readable<Array>>>, index: usize) -> Res
         }
 
         let cell = cells_array.get(index as u32);
-        Reflect::set(
-            &cell,
-            &JsValue::from_str("isExplored"),
-            &JsValue::from_bool(true),
-        )?;
+        let mut typed_cell: MapCell = serde_wasm_bindgen::from_value(cell).map_err(|err| {
+            JsValue::from_str(&format!("Failed to decode map cell from store: {err}"))
+        })?;
+        typed_cell.mark_explored();
+
+        let updated_cell = serde_wasm_bindgen::to_value(&typed_cell).map_err(|err| {
+            JsValue::from_str(&format!("Failed to encode updated map cell: {err}"))
+        })?;
+        cells_array.set(index as u32, updated_cell);
 
         Ok(())
     })

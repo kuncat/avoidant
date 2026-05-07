@@ -24,7 +24,7 @@ const TYPESCRIPT_TYPES: &str = r#"
 import type { Readable } from "svelte/store";
 "#;
 
-#[derive(Serialize, Tsify)]
+#[derive(Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct MapCell {
@@ -171,5 +171,9 @@ impl MapCell {
             is_void,
             vertices,
         }
+    }
+
+    pub(crate) fn mark_explored(&mut self) {
+        self.is_explored = true;
     }
 }

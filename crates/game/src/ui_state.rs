@@ -11,7 +11,8 @@ use crate::{Pulse, Pulses};
 #[derive(Clone)]
 #[wasm_bindgen]
 pub struct UiState {
-    pulses: Rc<RefCell<Readable<Array>>>,
+    pulses_store: Rc<RefCell<Readable<Array>>>,
+    pulses: Rc<RefCell<Vec<Pulse>>>,
     next_pulse_id: Rc<RefCell<u32>>,
 }
 
@@ -19,7 +20,7 @@ pub struct UiState {
 impl UiState {
     #[wasm_bindgen(getter, js_name = pulses)]
     pub fn pulses_store(&self) -> Pulses {
-        self.pulses.borrow().get_store().into()
+        self.pulses_store.borrow().get_store().into()
     }
 
     #[wasm_bindgen(js_name = "addPulse")]
@@ -38,7 +39,8 @@ impl UiState {
 impl UiState {
     pub(crate) fn new() -> Self {
         Self {
-            pulses: Rc::new(RefCell::new(Readable::new(Array::new()))),
+            pulses_store: Rc::new(RefCell::new(Readable::new(Array::new()))),
+            pulses: Rc::new(RefCell::new(Vec::new())),
             next_pulse_id: Rc::new(RefCell::new(0)),
         }
     }
@@ -65,10 +67,8 @@ impl UiState {
             duration_ms,
             is_remote,
         );
-        let pulse: JsValue = pulse.into();
-        self.pulses.borrow_mut().set_with(|pulses_array| {
-            pulses_array.push(pulse.as_ref());
-        });
+        self.pulses.borrow_mut().push(pulse);
+        self.sync_pulses_store();
 
         let ui_state = self.clone();
         spawn_local(async move {
@@ -82,20 +82,23 @@ impl UiState {
     }
 
     fn remove_pulse_by_id(&self, pulse_id: u32) -> Result<(), JsValue> {
-        self.pulses.borrow_mut().set_with(|pulses_array| {
-            let filtered = Array::new();
-            for idx in 0..pulses_array.length() {
-                let pulse = pulses_array.get(idx);
-                let id = Reflect::get(&pulse, &JsValue::from_str("id"))?
-                    .as_f64()
-                    .unwrap_or(-1.0) as u32;
-                if id != pulse_id {
-                    filtered.push(&pulse);
-                }
+        self.pulses
+            .borrow_mut()
+            .retain(|pulse| pulse.id() != pulse_id);
+        self.sync_pulses_store();
+        Ok(())
+    }
+
+    fn sync_pulses_store(&self) {
+        let pulses = self.pulses.borrow();
+        self.pulses_store.borrow_mut().set_with(|pulses_array| {
+            let next = Array::new();
+            for pulse in pulses.iter() {
+                let pulse: JsValue = pulse.clone().into();
+                next.push(pulse.as_ref());
             }
-            *pulses_array = filtered;
-            Ok::<(), JsValue>(())
-        })
+            *pulses_array = next;
+        });
     }
 }
 
