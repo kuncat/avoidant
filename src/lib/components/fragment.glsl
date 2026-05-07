@@ -9,6 +9,7 @@ uniform int pulseCount;
 uniform float pulseTimers[MAX_PULSES];
 uniform vec3 pulsePositions[MAX_PULSES];
 uniform float pulseOriginCells[MAX_PULSES];
+uniform float pulseIsRemote[MAX_PULSES];
 
 float remapClamped(float value, float inMin, float inMax, float outMin, float outMax) {
   float t = clamp((value - inMin) / (inMax - inMin), 0.0, 1.0);
@@ -19,6 +20,7 @@ void main() {
   float elevation = remapClamped(vHeight, elevationMin, elevationMax, 0.0, 1.0);
 
   float totalRing = 0.0;
+  float remoteRing = 0.0;
   float totalSweep = 0.0;
   float hasSweep = 0.0;
 
@@ -34,7 +36,10 @@ void main() {
     float ring = (1.0 - smoothstep(ringWidth, ringWidth + 0.8, ringDistance)) * pulseActive;
     float pulseFade = 1.0 - pulseProgress;
 
-    totalRing = max(totalRing, ring * pulseFade);
+    float ringContribution = ring * pulseFade;
+    totalRing = max(totalRing, ringContribution);
+    float isRemote = step(0.5, pulseIsRemote[i]);
+    remoteRing = max(remoteRing, ringContribution * isRemote);
 
     // Sweep coloring only for pulses that originated from this cell
     float isPulseOriginCell = step(abs(pulseOriginCells[i] - cellIndex), 0.5);
@@ -54,7 +59,10 @@ void main() {
   vec3 highColor = mix(unexploredHigh, exploredHigh, 1.0 - colorFactor);
   vec3 terrainColor = mix(lowColor, highColor, elevation);
 
-  vec3 pulseTint = vec3(0.55, 0.95, 1.0);
+  vec3 localPulseTint = vec3(0.55, 0.95, 1.0);
+  vec3 remotePulseTint = vec3(1.0, 0.42, 0.38);
+  float remoteFactor = step(0.0001, totalRing) * clamp(remoteRing / (totalRing + 0.00001), 0.0, 1.0);
+  vec3 pulseTint = mix(localPulseTint, remotePulseTint, remoteFactor);
   vec3 finalColor = mix(terrainColor, pulseTint, totalRing * 0.85);
 
   gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);

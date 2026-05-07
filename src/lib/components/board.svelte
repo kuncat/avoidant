@@ -1,19 +1,16 @@
 <script module lang="ts">
   export const MAX_PULSES = 16;
   export const fragmentShader = `#define MAX_PULSES ${MAX_PULSES}\n` + _fragmentShader;
-  const PULSE_DURATION = 250;
 </script>
 
 <script lang="ts">
+  import { onMount } from "svelte";
   import _fragmentShader from "./fragment.glsl?raw";
   import vertexShader from "./vertex.glsl?raw";
-  import type { GameState, MapCell } from "wasm-pkg";
+  import type { GameState, MapCell, Pulse } from "wasm-pkg";
   import { T } from "@threlte/core";
   import { interactivity } from "@threlte/extras";
   import { DoubleSide, Vector3 } from "three";
-  import { quadOut } from "svelte/easing";
-  import { Tween } from "svelte/motion";
-  import { SvelteSet } from "svelte/reactivity";
 
   interactivity();
 
@@ -23,6 +20,19 @@
 
   let { gameState = $bindable() }: Props = $props();
   let cells = $derived(gameState?.cells);
+  let pulses = $derived(gameState?.uiState?.pulses);
+  let nowMs = $state(0);
+
+  onMount(() => {
+    let rafId = 0;
+    const now = () => globalThis.performance?.now?.() ?? Date.now();
+    const tick = () => {
+      nowMs = now();
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  });
 
   function triangulateCell(vertices: MapCell["vertices"]): number[] {
     if (vertices.length < 3) return [];
@@ -71,40 +81,33 @@
     return edgeTriangles;
   }
 
-  class Pulse {
-    originCell: number;
-    position: Vector3;
-    timer = new Tween(0, {
-      easing: quadOut,
-    });
-    constructor(originCell: number, position: Vector3) {
-      this.originCell = originCell;
-      this.position = position;
-    }
-
-    start() {
-      this.timer.set(0, { duration: 0 }).then(() => {
-        this.timer.set(1, { duration: PULSE_DURATION }).then(() => {
-          gameState.exploreCell(this.originCell);
-          pulses.delete(this);
-        });
-      });
-    }
-
-    static null() {
-      return new Pulse(-1, new Vector3());
-    }
-  }
-  const pulses = new SvelteSet<Pulse>();
+  const nullPulse: Pulse = {
+    id: -1,
+    originCell: -1,
+    position: [0, 0, 0],
+    createdAtMs: 0,
+    durationMs: 1,
+    isRemote: false,
+  };
   const pulsesArray = $derived(
-    Array.from(pulses)
+    Array.from($pulses ?? [])
       .reverse()
       .slice(0, MAX_PULSES)
-      .concat(Array(Math.max(0, MAX_PULSES - pulses.size)).fill(Pulse.null())),
+      .concat(Array(Math.max(0, MAX_PULSES - (($pulses ?? []).length))).fill(nullPulse)),
   );
-  let pulseTimersUniform = $derived(pulsesArray.map((p) => p.timer.current));
-  let pulsePositionsUniform = $derived(pulsesArray.map((p) => p.position));
+  let pulseTimersUniform = $derived(
+    pulsesArray.map((p) => {
+      if (p.id < 0) return 0;
+      const elapsed = Math.max(0, nowMs - p.createdAtMs);
+      const duration = Math.max(1, p.durationMs);
+      return Math.min(1, elapsed / duration);
+    }),
+  );
+  let pulsePositionsUniform = $derived(
+    pulsesArray.map((p) => new Vector3(p.position[0], p.position[1], p.position[2])),
+  );
   let pulseOriginCellsUniform = $derived(pulsesArray.map((p) => p.originCell));
+  let pulseIsRemoteUniform = $derived(pulsesArray.map((p) => (p.isRemote ? 1 : 0)));
 </script>
 
 <T.Group>
@@ -114,11 +117,8 @@
     {@const edgeRibbonHighlight = cellEdgeRibbon(cell.vertices, 0.13, 0.16)}
     {#if trianglePositions.length > 0}
       <T.Mesh
-        onclick={(event: { point: Vector3 }) => {
-          const pulse = new Pulse(cellIndex, event.point.clone());
-          pulses.add(pulse);
-          pulse.start();
-        }}
+        onclick={(event: { point: Vector3 }) =>
+          gameState.queueExplorePulse(cellIndex, event.point.x, event.point.y, event.point.z)}
       >
         <T.BufferGeometry attach="geometry">
           <T.BufferAttribute
@@ -139,13 +139,15 @@
             pulseTimers: { value: new Array(MAX_PULSES).fill(0) },
             pulsePositions: { value: new Array(MAX_PULSES).fill(null).map(() => new Vector3()) },
             pulseOriginCells: { value: new Array(MAX_PULSES).fill(-1) },
+            pulseIsRemote: { value: new Array(MAX_PULSES).fill(0) },
           }}
           uniforms.isExplored.value={cell.isExplored ? 1.0 : 0.0}
           uniforms.cellIndex.value={cellIndex}
-          uniforms.pulseCount.value={pulses.size}
+          uniforms.pulseCount.value={Math.min(($pulses ?? []).length, MAX_PULSES)}
           uniforms.pulseTimers.value={pulseTimersUniform}
           uniforms.pulsePositions.value={pulsePositionsUniform}
           uniforms.pulseOriginCells.value={pulseOriginCellsUniform}
+          uniforms.pulseIsRemote.value={pulseIsRemoteUniform}
         />
       </T.Mesh>
 

@@ -54,7 +54,7 @@ impl GameTicket {
 }
 
 impl Ticket for GameTicket {
-    const KIND: &'static str = "game"; // TODO: See if this is needed
+    const KIND: &'static str = "game";
 
     fn to_bytes(&self) -> Vec<u8> {
         postcard::to_stdvec(&self).unwrap()

@@ -1,16 +1,18 @@
 mod utils;
 
-use std::default;
 use std::{cell::RefCell, rc::Rc};
 
 use bluenoise::BlueNoise;
 use futures_util::StreamExt;
-use js_sys::{Array, JSON, Object, Reflect};
+use js_sys::{Array, JSON, Reflect};
+use n0_future::time::Duration;
 use rand::RngCore;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
+use serde::{Deserialize, Serialize};
 use svelte_store::Readable;
+use tsify::Tsify;
 use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -21,6 +23,12 @@ use wasm_bindgen::{JsCast, JsValue};
 
 const MESSAGE_RECEIVED_EVENT: &str = "messageReceived";
 const MUTATION_DELIMITER: char = '|';
+const PULSE_DURATION_MS: u32 = 250; // TODO: Decrease after testing
+
+#[wasm_bindgen(typescript_custom_section)]
+const TYPESCRIPT_TYPES: &str = r#"
+import type { Readable } from "svelte/store";
+"#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -60,21 +68,33 @@ impl CellMutationOp {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Mutation {
-    ExploreCell { index: usize },
+    ExploreCell {
+        index: usize,
+        pulse_position: [f64; 3],
+    },
 }
 
 impl Mutation {
     fn encode(self) -> String {
         match self {
-            Self::ExploreCell { index } => format!(
-                "{}{}{}{}{}",
+            Self::ExploreCell {
+                index,
+                pulse_position: [x, y, z],
+            } => format!(
+                "{}{}{}{}{}{}{}{}{}{}{}",
                 MutationKind::Cell.to_wire(),
                 MUTATION_DELIMITER,
                 CellMutationOp::ExploreCell.to_wire(),
                 MUTATION_DELIMITER,
-                index
+                index,
+                MUTATION_DELIMITER,
+                x,
+                MUTATION_DELIMITER,
+                y,
+                MUTATION_DELIMITER,
+                z
             ),
         }
     }
@@ -88,7 +108,13 @@ impl Mutation {
             MutationKind::Cell => match CellMutationOp::from_wire(op)? {
                 CellMutationOp::ExploreCell => {
                     let index: usize = parts.next()?.parse().ok()?;
-                    Self::ExploreCell { index }
+                    let x: f64 = parts.next()?.parse().ok()?;
+                    let y: f64 = parts.next()?.parse().ok()?;
+                    let z: f64 = parts.next()?.parse().ok()?;
+                    Self::ExploreCell {
+                        index,
+                        pulse_position: [x, y, z],
+                    }
                 }
             },
         };
@@ -102,7 +128,7 @@ impl Mutation {
 
     fn apply(self, cells: &Rc<RefCell<Readable<Array>>>) -> Result<(), JsValue> {
         match self {
-            Self::ExploreCell { index } => mark_cell_explored(cells, index),
+            Self::ExploreCell { index, .. } => mark_cell_explored(cells, index),
         }
     }
 }
@@ -117,33 +143,59 @@ struct NetworkTextMessage {
     text: String,
 }
 
-#[wasm_bindgen(typescript_custom_section)]
-const TYPESCRIPT_TYPES: &str = r#"
-import type { Readable } from "svelte/store";
-
-export interface GameOptions {
-  numCells: number;
-  rngSeed: number;
-  maxSamples?: number;
-  slack?: number;
-  /** 0.0 = smooth broad hills, 1.0 = tight spiky features. Default: 0.4 */
-  spikiness?: number;
-  /** Minimum vertex height in world units. Default: -0.4 */
-  elevationMin?: number;
-  /** Maximum vertex height in world units. Default: 0.4 */
-  elevationMax?: number;
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct MapCell {
+    is_explored: bool,
+    is_void: bool,
+    vertices: Vec<[f64; 3]>,
 }
 
-export interface MapCell {
-    isExplored: boolean,
-    isVoid: boolean,
-    vertices: Array<[number, number, number]>,
+#[derive(Serialize, Deserialize, Tsify)]
+#[tsify(from_wasm_abi, into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct GameOptions {
+    num_cells: u64,
+    rng_seed: u64,
+    #[tsify(optional)]
+    max_samples: Option<f64>,
+    #[tsify(optional)]
+    slack: Option<f64>,
+    #[tsify(optional)]
+    /** 0.0 = smooth broad hills, 1.0 = tight spiky features. Default: 0.4 */
+    spikiness: Option<f64>,
+    #[tsify(optional)]
+    /** Minimum vertex height in world units. Default: -0.4 */
+    elevation_min: Option<f64>,
+    #[tsify(optional)]
+    /** Maximum vertex height in world units. Default: 0.4 */
+    elevation_max: Option<f64>,
 }
-"#;
+
+#[derive(Serialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct Pulse {
+    id: u32,
+    origin_cell: usize,
+    position: [f64; 3],
+    created_at_ms: f64,
+    duration_ms: u32,
+    is_remote: bool,
+}
+
+#[derive(Clone)]
+#[wasm_bindgen]
+pub struct UiState {
+    pulses: Rc<RefCell<Readable<Array>>>,
+    next_pulse_id: Rc<RefCell<u32>>,
+}
 
 #[wasm_bindgen]
 pub struct GameState {
     cells: Rc<RefCell<Readable<Array>>>,
+    ui_state: UiState,
     num_cells: u64,
     rng_seed: u64,
     max_samples: u32,
@@ -159,36 +211,147 @@ pub struct GameState {
 
 #[wasm_bindgen]
 extern "C" {
-    #[wasm_bindgen(typescript_type = "GameOptions")]
-    pub type GameOptions;
-
-    #[wasm_bindgen(typescript_type = "MapCell")]
-    pub type MapCell;
-
     #[wasm_bindgen(typescript_type = "Readable<Array<MapCell>>")]
     pub type MapCells;
+
+    #[wasm_bindgen(typescript_type = "Readable<Array<Pulse>>")]
+    pub type Pulses;
+}
+
+#[wasm_bindgen]
+impl UiState {
+    #[wasm_bindgen(getter, js_name = pulses)]
+    pub fn pulses_store(&self) -> Pulses {
+        self.pulses.borrow().get_store().into()
+    }
+
+    #[wasm_bindgen(js_name = "addPulse")]
+    pub fn add_pulse(
+        &self,
+        origin_cell: usize,
+        x: f64,
+        y: f64,
+        z: f64,
+        duration_ms: u32,
+    ) -> Result<u32, JsValue> {
+        self.add_pulse_internal(origin_cell, x, y, z, duration_ms, false)
+    }
+}
+
+impl UiState {
+    fn add_pulse_internal(
+        &self,
+        origin_cell: usize,
+        x: f64,
+        y: f64,
+        z: f64,
+        duration_ms: u32,
+        is_remote: bool,
+    ) -> Result<u32, JsValue> {
+        let mut next_pulse_id = self.next_pulse_id.borrow_mut();
+        let pulse_id = *next_pulse_id;
+        *next_pulse_id = next_pulse_id.wrapping_add(1);
+
+        let created_at_ms = monotonic_now_ms();
+        let pulse = Pulse {
+            id: pulse_id,
+            origin_cell,
+            position: [x, y, z],
+            created_at_ms,
+            duration_ms,
+            is_remote,
+        };
+        let pulse = serde_wasm_bindgen::to_value(&pulse)?;
+        self.pulses.borrow_mut().set_with(|pulses_array| {
+            pulses_array.push(pulse.as_ref());
+        });
+
+        let ui_state = self.clone();
+        spawn_local(async move {
+            n0_future::time::sleep(Duration::from_millis(duration_ms as u64)).await;
+            if let Err(err) = ui_state.remove_pulse_by_id(pulse_id) {
+                tracing::warn!("failed to remove expired pulse: {:?}", err);
+            }
+        });
+
+        Ok(pulse_id)
+    }
+}
+
+fn monotonic_now_ms() -> f64 {
+    let global = js_sys::global();
+    let performance = Reflect::get(&global, &JsValue::from_str("performance"))
+        .ok()
+        .filter(|value| !value.is_null() && !value.is_undefined());
+
+    if let Some(performance) = performance {
+        let now_fn = Reflect::get(&performance, &JsValue::from_str("now"))
+            .ok()
+            .and_then(|value| value.dyn_into::<js_sys::Function>().ok());
+        if let Some(now_fn) = now_fn {
+            if let Ok(result) = now_fn.call0(&performance) {
+                if let Some(ms) = result.as_f64() {
+                    return ms;
+                }
+            }
+        }
+    }
+
+    js_sys::Date::now()
+}
+
+impl UiState {
+    fn new() -> Self {
+        Self {
+            pulses: Rc::new(RefCell::new(Readable::new(Array::new()))),
+            next_pulse_id: Rc::new(RefCell::new(0)),
+        }
+    }
+
+    fn remove_pulse_by_id(&self, pulse_id: u32) -> Result<(), JsValue> {
+        self.pulses.borrow_mut().set_with(|pulses_array| {
+            let filtered = Array::new();
+            for idx in 0..pulses_array.length() {
+                let pulse = pulses_array.get(idx);
+                let id = Reflect::get(&pulse, &JsValue::from_str("id"))?
+                    .as_f64()
+                    .unwrap_or(-1.0) as u32;
+                if id != pulse_id {
+                    filtered.push(&pulse);
+                }
+            }
+            *pulses_array = filtered;
+            Ok::<(), JsValue>(())
+        })
+    }
 }
 
 impl MapCell {
     fn new(vertices: &Array, is_explored: bool, is_void: bool) -> Result<MapCell, JsValue> {
-        let map_cell = Object::new();
-        Reflect::set(
-            map_cell.as_ref(),
-            &JsValue::from_str("isExplored"),
-            &JsValue::from_bool(is_explored),
-        )?;
-        Reflect::set(
-            map_cell.as_ref(),
-            &JsValue::from_str("isVoid"),
-            &JsValue::from_bool(is_void),
-        )?;
-        Reflect::set(
-            map_cell.as_ref(),
-            &JsValue::from_str("vertices"),
-            &vertices.clone().into(),
-        )?;
+        let mut vertices_vec = Vec::with_capacity(vertices.length() as usize);
+        for i in 0..vertices.length() {
+            let vertex = vertices.get(i).dyn_into::<Array>()?;
+            let x = vertex
+                .get(0)
+                .as_f64()
+                .ok_or_else(|| JsValue::from_str("MapCell vertex missing x coordinate"))?;
+            let y = vertex
+                .get(1)
+                .as_f64()
+                .ok_or_else(|| JsValue::from_str("MapCell vertex missing y coordinate"))?;
+            let z = vertex
+                .get(2)
+                .as_f64()
+                .ok_or_else(|| JsValue::from_str("MapCell vertex missing z coordinate"))?;
+            vertices_vec.push([x, y, z]);
+        }
 
-        Ok(map_cell.unchecked_into::<MapCell>())
+        let map_cell = MapCell {
+            is_explored,
+            is_void,
+            vertices: vertices_vec,
+        };
+        Ok(map_cell)
     }
 }
 
@@ -198,42 +361,22 @@ impl GameState {
     pub fn new(options: GameOptions) -> Result<GameState, JsValue> {
         utils::set_panic_hook();
 
-        let options: Object = options
-            .dyn_into::<Object>()
-            .map_err(|_| JsValue::from_str("GameState constructor expects a plain object"))?;
-        let options_json = JSON::stringify(options.as_ref())?
+        let options_value = serde_wasm_bindgen::to_value(&options)?;
+        let options_json = JSON::stringify(&options_value)?
             .as_string()
             .ok_or_else(|| JsValue::from_str("Failed to serialize game options"))?;
 
-        let num_cells = Reflect::get(options.as_ref(), &JsValue::from_str("numCells"))?
-            .as_f64()
-            .unwrap() as u64;
-        let rng_seed = Reflect::get(options.as_ref(), &JsValue::from_str("rngSeed"))?
-            .as_f64()
-            .unwrap() as u64;
-        let max_samples = Reflect::get(options.as_ref(), &JsValue::from_str("maxSamples"))?
-            .as_f64()
-            .unwrap_or(20.0)
-            .clamp(1.0, 128.0) as u32;
-        let slack = Reflect::get(options.as_ref(), &JsValue::from_str("slack"))?
-            .as_f64()
-            .unwrap_or(0.25)
-            .clamp(0.0, 0.95) as f32;
-        let spikiness = Reflect::get(options.as_ref(), &JsValue::from_str("spikiness"))?
-            .as_f64()
-            .unwrap_or(0.4)
-            .clamp(0.0, 1.0);
-        let elevation_min = Reflect::get(options.as_ref(), &JsValue::from_str("elevationMin"))?
-            .as_f64()
-            .unwrap_or(-0.4);
-        let elevation_max = Reflect::get(options.as_ref(), &JsValue::from_str("elevationMax"))?
-            .as_f64()
-            .unwrap_or(0.4);
+        let max_samples = options.max_samples.unwrap_or(20.0).clamp(1.0, 128.0) as u32;
+        let slack = options.slack.unwrap_or(0.25).clamp(0.0, 0.95) as f32;
+        let spikiness = options.spikiness.unwrap_or(0.4).clamp(0.0, 1.0);
+        let elevation_min = options.elevation_min.unwrap_or(-0.4);
+        let elevation_max = options.elevation_max.unwrap_or(0.4);
 
         Ok(GameState {
             cells: Rc::new(RefCell::new(Readable::new(Array::new()))),
-            num_cells: num_cells,
-            rng_seed: rng_seed,
+            ui_state: UiState::new(),
+            num_cells: options.num_cells,
+            rng_seed: options.rng_seed,
             max_samples,
             slack,
             spikiness,
@@ -249,6 +392,11 @@ impl GameState {
     #[wasm_bindgen(getter, js_name = cells)]
     pub fn cells_store(&self) -> MapCells {
         self.cells.borrow().get_store().into()
+    }
+
+    #[wasm_bindgen(getter, js_name = "uiState")]
+    pub fn ui_state(&self) -> UiState {
+        self.ui_state.clone()
     }
 
     #[wasm_bindgen(getter, js_name = "elevationMin")]
@@ -302,7 +450,8 @@ impl GameState {
                     polygon_points.push(&point_pair.into());
                 }
                 let map_cell = MapCell::new(&polygon_points, false, false)?;
-                output_cells.push(map_cell.as_ref());
+                let map_cell = serde_wasm_bindgen::to_value(&map_cell)?;
+                output_cells.push(&map_cell);
             }
         } else {
             return Err(JsValue::from_str(&format!(
@@ -316,14 +465,25 @@ impl GameState {
     }
 
     #[wasm_bindgen(js_name = "exploreCell")]
-    pub fn explore_cell(&mut self, index: usize) -> Result<(), JsValue> {
-        self.apply_mutation_with_origin(Mutation::ExploreCell { index }, MutationOrigin::Local)
+    pub fn explore_cell(&mut self, index: usize, x: f64, y: f64, z: f64) -> Result<(), JsValue> {
+        self.queue_explore_pulse(index, x, y, z)
+    }
+
+    #[wasm_bindgen(js_name = "queueExplorePulse")]
+    pub fn queue_explore_pulse(&self, index: usize, x: f64, y: f64, z: f64) -> Result<(), JsValue> {
+        self.dispatch_explore_mutation(
+            Mutation::ExploreCell {
+                index,
+                pulse_position: [x, y, z],
+            },
+            MutationOrigin::Local,
+        )
     }
 
     #[wasm_bindgen(js_name = "invite")]
     pub async fn invite(&mut self, nickname: String) -> Result<String, JsValue> {
         if self.network_node.is_none() {
-            let node = NetworkNode::spawn().await.map_err(js_err_to_value)?;
+            let node = NetworkNode::spawn().await.map_err(Into::<JsValue>::into)?;
             self.network_node = Some(node);
         }
 
@@ -332,7 +492,7 @@ impl GameState {
                 .network_node
                 .as_ref()
                 .ok_or_else(|| JsValue::from_str("Network node is unavailable"))?;
-            let channel = node.create(nickname).await.map_err(js_err_to_value)?;
+            let channel = node.create(nickname).await.map_err(Into::<JsValue>::into)?;
             self.network_channel = Some(channel);
             self.attach_network_listener();
         }
@@ -349,7 +509,7 @@ impl GameState {
 
         channel
             .ticket_with_game_options(ticket_opts, Some(self.game_options_json.clone()))
-            .map_err(js_err_to_value)
+            .map_err(Into::<JsValue>::into)
     }
 
     #[wasm_bindgen(js_name = "joinFromTicket")]
@@ -360,11 +520,15 @@ impl GameState {
             .game_options_json
             .ok_or_else(|| JsValue::from_str("Ticket does not include game options"))?;
         let options_value = JSON::parse(&options_json)?;
-        let mut state = GameState::new(options_value.unchecked_into::<GameOptions>())?;
+        let options: GameOptions = serde_wasm_bindgen::from_value(options_value)?;
+        let mut state = GameState::new(options)?;
         state.generate_map()?;
 
-        let node = NetworkNode::spawn().await.map_err(js_err_to_value)?;
-        let channel = node.join(ticket, nickname).await.map_err(js_err_to_value)?;
+        let node = NetworkNode::spawn().await.map_err(Into::<JsValue>::into)?;
+        let channel = node
+            .join(ticket, nickname)
+            .await
+            .map_err(Into::<JsValue>::into)?;
         state.network_node = Some(node);
         state.network_channel = Some(channel);
         state.attach_network_listener();
@@ -384,6 +548,7 @@ impl GameState {
         };
 
         let cells = self.cells.clone();
+        let ui_state = self.ui_state.clone();
         let local_endpoint_id = self.network_node.as_ref().map(|node| node.endpoint_id());
         let receiver = channel.receiver();
         self.network_listener_started = true;
@@ -405,10 +570,14 @@ impl GameState {
 
                             if let Err(err) = apply_incoming_mutation(
                                 &cells,
+                                &ui_state,
                                 MutationOrigin::Peer,
                                 &message.text,
                             ) {
-                                tracing::warn!("failed to apply state mutation from peer: {:?}", err);
+                                tracing::warn!(
+                                    "failed to apply state mutation from peer: {:?}",
+                                    err
+                                );
                             }
                         }
                     }
@@ -421,16 +590,33 @@ impl GameState {
         });
     }
 
-    fn apply_mutation_with_origin(
+    fn dispatch_explore_mutation(
         &self,
         mutation: Mutation,
         origin: MutationOrigin,
     ) -> Result<(), JsValue> {
-        mutation.apply(&self.cells)?;
+        let is_remote = matches!(origin, MutationOrigin::Peer);
+        let (index, [x, y, z]) = match mutation {
+            Mutation::ExploreCell {
+                index,
+                pulse_position,
+            } => (index, pulse_position),
+        };
+        self.ui_state
+            .add_pulse_internal(index, x, y, z, PULSE_DURATION_MS, is_remote)
+            .map(|_| ())?;
 
-        if match origin { MutationOrigin::Local => true, _ => false } {
+        if matches!(origin, MutationOrigin::Local) {
             self.broadcast_state_mutation(mutation);
         }
+
+        let cells = self.cells.clone();
+        spawn_local(async move {
+            n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
+            if let Err(err) = mutation.apply(&cells) {
+                tracing::warn!("failed to apply delayed mutation: {:?}", err);
+            }
+        });
 
         Ok(())
     }
@@ -471,16 +657,36 @@ fn extract_message_text(event: &JsValue) -> Option<NetworkTextMessage> {
 
 fn apply_incoming_mutation(
     cells: &Rc<RefCell<Readable<Array>>>,
-    _origin: MutationOrigin,
+    ui_state: &UiState,
+    origin: MutationOrigin,
     message_text: &str,
 ) -> Result<(), JsValue> {
     let Some(mutation) = Mutation::decode(message_text) else {
         return Ok(());
     };
 
-    mutation.apply(cells)
-}
+    let is_remote = matches!(origin, MutationOrigin::Peer);
+    let (index, [x, y, z]) = match mutation {
+        Mutation::ExploreCell {
+            index,
+            pulse_position,
+        } => (index, pulse_position),
+    };
 
+    ui_state
+        .add_pulse_internal(index, x, y, z, PULSE_DURATION_MS, is_remote)
+        .map(|_| ())?;
+
+    let delayed_cells = cells.clone();
+    spawn_local(async move {
+        n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
+        if let Err(err) = mutation.apply(&delayed_cells) {
+            tracing::warn!("failed to apply delayed incoming mutation: {:?}", err);
+        }
+    });
+
+    Ok(())
+}
 fn mark_cell_explored(cells: &Rc<RefCell<Readable<Array>>>, index: usize) -> Result<(), JsValue> {
     cells.borrow_mut().set_with(|cells_array| {
         if index >= cells_array.length() as usize {
@@ -496,10 +702,6 @@ fn mark_cell_explored(cells: &Rc<RefCell<Readable<Array>>>, index: usize) -> Res
 
         Ok(())
     })
-}
-
-fn js_err_to_value(err: wasm_bindgen::JsError) -> JsValue {
-    err.into()
 }
 
 /// Computes terrain elevation for a world-space point using layered value noise.
