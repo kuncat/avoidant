@@ -1,7 +1,7 @@
 mod utils;
 
 use bluenoise::BlueNoise;
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, JSON, Object, Reflect};
 use rand::RngCore;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
@@ -10,7 +10,8 @@ use svelte_store::Readable;
 use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::prelude::*;
 mod net;
-use net::NetworkNode;
+use net::{NetworkNode, TicketOpts};
+use networking::GameTicket;
 use wasm_bindgen::{JsCast, JsValue};
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -44,6 +45,8 @@ pub struct GameState {
     rng_seed: u64,
     max_samples: u32,
     network_node: Option<NetworkNode>,
+    network_channel: Option<net::Channel>,
+    game_options_json: String,
     slack: f32,
     spikiness: f64,
     elevation_min: f64,
@@ -94,6 +97,9 @@ impl GameState {
         let options: Object = options
             .dyn_into::<Object>()
             .map_err(|_| JsValue::from_str("GameState constructor expects a plain object"))?;
+        let options_json = JSON::stringify(options.as_ref())?
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("Failed to serialize game options"))?;
 
         let num_cells = Reflect::get(options.as_ref(), &JsValue::from_str("numCells"))?
             .as_f64()
@@ -130,6 +136,8 @@ impl GameState {
             elevation_min,
             elevation_max,
             network_node: None,
+            network_channel: None,
+            game_options_json: options_json,
         })
     }
 
@@ -146,6 +154,11 @@ impl GameState {
     #[wasm_bindgen(getter, js_name = "elevationMax")]
     pub fn elevation_max(&self) -> f64 {
         self.elevation_max
+    }
+
+    #[wasm_bindgen(getter, js_name = "hasNetworkNode")]
+    pub fn has_network_node(&self) -> bool {
+        self.network_node.is_some()
     }
 
     pub fn generate_map(&mut self) -> Result<JsValue, JsValue> {
@@ -210,18 +223,85 @@ impl GameState {
         })
     }
 
-    #[wasm_bindgen(js_name = "inviteToGame")] // TODO: Use a better name
-    pub async fn invite(&mut self) {
-        // TODO: Check if there is already a network node
-        self.network_node = Some(NetworkNode::spawn().await.unwrap());
+    #[wasm_bindgen(js_name = "startNetworkNode")]
+    pub async fn start_network_node(&mut self) -> Result<(), JsValue> {
+        if self.network_node.is_some() {
+            tracing::info!("start_network_node called but network node already exists");
+            return Ok(());
+        }
+        let node = NetworkNode::spawn().await.map_err(js_err_to_value)?;
+        self.network_node = Some(node);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "invite")]
+    pub async fn invite(&mut self, nickname: String) -> Result<String, JsValue> {
+        if self.network_node.is_none() {
+            let node = NetworkNode::spawn().await.map_err(js_err_to_value)?;
+            self.network_node = Some(node);
+        }
+
+        if self.network_channel.is_none() {
+            let node = self
+                .network_node
+                .as_ref()
+                .ok_or_else(|| JsValue::from_str("Network node is unavailable"))?;
+            let channel = node.create(nickname).await.map_err(js_err_to_value)?;
+            self.network_channel = Some(channel);
+        }
+
+        let channel = self
+            .network_channel
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("Network channel is unavailable"))?;
+        let ticket_opts = TicketOpts {
+            include_myself: true,
+            include_bootstrap: true,
+            include_neighbors: true,
+        };
+
+        channel
+            .ticket_with_game_options(ticket_opts, Some(self.game_options_json.clone()))
+            .map_err(js_err_to_value)
+    }
+
+    #[wasm_bindgen(js_name = "joinFromTicket")]
+    pub async fn join_from_ticket(ticket: String, nickname: String) -> Result<GameState, JsValue> {
+        let parsed_ticket = GameTicket::deserialize(&ticket)
+            .map_err(|err| JsValue::from_str(&format!("Invalid game ticket: {err}")))?;
+        let options_json = parsed_ticket
+            .game_options_json
+            .ok_or_else(|| JsValue::from_str("Ticket does not include game options"))?;
+        let options_value = JSON::parse(&options_json)?;
+        let mut state = GameState::new(options_value.unchecked_into::<GameOptions>())?;
+        state.generate_map()?;
+
+        let node = NetworkNode::spawn().await.map_err(js_err_to_value)?;
+        let channel = node.join(ticket, nickname).await.map_err(js_err_to_value)?;
+        state.network_node = Some(node);
+        state.network_channel = Some(channel);
+
+        Ok(state)
     }
 }
 
+fn js_err_to_value(err: wasm_bindgen::JsError) -> JsValue {
+    err.into()
+}
+
+/// Computes terrain elevation for a world-space point using layered value noise.
+///
+/// # Arguments
+/// * `x` - World-space x coordinate.
+/// * `y` - World-space y coordinate.
+/// * `seed` - Deterministic seed that controls the generated terrain pattern.
+/// * `spikiness` - Shape control in `[0.0, 1.0]`; lower is smoother and broader,
+///   higher is tighter and spikier.
+/// * `elevation_range` - Output elevation bounds as `(min, max)`.
 fn vertex_height(x: f64, y: f64, seed: u64, spikiness: f64, elevation_range: (f64, f64)) -> f64 {
     let (elev_min, elev_max) = elevation_range;
     let mid = (elev_min + elev_max) / 2.0;
     let amplitude = (elev_max - elev_min) / 2.0;
-    // spikiness 0.0 = smooth broad hills (large scale), 1.0 = tight spiky features (small scale)
     let scale = 25.0 - 22.0 * spikiness;
     let detail_scale = scale / 3.0;
     let detail_amplitude = amplitude * 0.08;

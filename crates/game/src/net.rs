@@ -39,6 +39,7 @@ impl NetworkNode {
         Ok(Self(inner))
     }
 
+    #[wasm_bindgen(js_name = "endpointId")]
     /// Returns the endpoint id of this node.
     pub fn endpoint_id(&self) -> String {
         self.0.endpoint_id().to_string()
@@ -111,6 +112,27 @@ pub struct Channel {
 
 #[wasm_bindgen]
 impl Channel {
+    pub(crate) fn ticket_with_game_options(
+        &self,
+        opts: TicketOpts,
+        game_options_json: Option<String>,
+    ) -> Result<String, JsError> {
+        let mut ticket = GameTicket::new(self.topic_id);
+        if opts.include_myself {
+            ticket.bootstrap.insert(self.me);
+        }
+        if opts.include_bootstrap {
+            ticket.bootstrap.extend(self.bootstrap.iter().copied());
+        }
+        if opts.include_neighbors {
+            let neighbors = self.neighbors.lock().unwrap();
+            ticket.bootstrap.extend(neighbors.iter().copied())
+        }
+        ticket.game_options_json = game_options_json;
+        tracing::info!("ticket generated for topic {}", ticket.topic_id);
+        Ok(ticket.serialize())
+    }
+
     #[wasm_bindgen(getter)]
     pub fn sender(&self) -> ChannelSender {
         self.sender.clone()
@@ -123,19 +145,7 @@ impl Channel {
 
     pub fn ticket(&self, opts: JsValue) -> Result<String, JsError> {
         let opts: TicketOpts = serde_wasm_bindgen::from_value(opts)?;
-        let mut ticket = GameTicket::new(self.topic_id);
-        if opts.include_myself {
-            ticket.bootstrap.insert(self.me);
-        }
-        if opts.include_bootstrap {
-            ticket.bootstrap.extend(self.bootstrap.iter().copied());
-        }
-        if opts.include_neighbors {
-            let neighbors = self.neighbors.lock().unwrap();
-            ticket.bootstrap.extend(neighbors.iter().copied())
-        }
-        tracing::info!("opts {:?} ticket {:?}", opts, ticket);
-        Ok(ticket.serialize())
+        self.ticket_with_game_options(opts, None)
     }
 
     pub fn id(&self) -> String {

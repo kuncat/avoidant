@@ -28,6 +28,8 @@ pub const PRESENCE_INTERVAL: Duration = Duration::from_secs(5);
 pub struct GameTicket {
     pub topic_id: TopicId,
     pub bootstrap: BTreeSet<EndpointId>,
+    #[serde(default)]
+    pub game_options_json: Option<String>,
 }
 
 impl GameTicket {
@@ -40,6 +42,7 @@ impl GameTicket {
         Self {
             topic_id,
             bootstrap: Default::default(),
+            game_options_json: None,
         }
     }
     pub fn deserialize(input: &str) -> Result<Self> {

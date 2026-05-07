@@ -10,6 +10,10 @@
   let gameState = $state<GameState | undefined>(undefined);
   let numCellsInput = $state(160);
   let rngSeedInput = $state(999);
+  let playerNameInput = $state("Player");
+  let gameConfig: "host" | "join" | undefined = $state(undefined);
+  let ticketInput = $state("");
+  let inviteTicket = $state("");
 
   onMount(async () => {
     await init();
@@ -26,8 +30,23 @@
         spikiness: 0.8,
       });
       gameState.generate_map();
+      inviteTicket = "";
     } catch (error) {
       console.error("Failed to start game", error);
+    } finally {
+      gameConfig = undefined;
+    }
+  }
+
+  async function joinGame() {
+    try {
+      gameState = await GameState.joinFromTicket(ticketInput, playerNameInput);
+      inviteTicket = "";
+    } catch (error) {
+      console.error("Failed to join game", error);
+    } finally {
+      gameConfig = undefined;
+      ticketInput = "";
     }
   }
 </script>
@@ -41,53 +60,155 @@
   {#if isLoading}
     <p>Loading...</p>
   {:else if !gameState}
-    <form class="w-full max-w-lg">
-      <div class="-mx-3 mb-2 flex flex-wrap">
-        <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-          <label
-            class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-            for="grid-first-name"
-          >
-            Size
-          </label>
-          <input
-            class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-            id="grid-first-name"
-            type="number"
-            inputmode="numeric"
-            bind:value={numCellsInput}
-            min="100"
-            max="4096"
-            step="1"
-          />
+    {#if gameConfig === "host"}
+      <form class="w-full max-w-lg">
+        <div class="-mx-3 mb-2 flex flex-wrap">
+          <div class="mb-6 w-full px-3 md:mb-0">
+            <label
+              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+              for="player-name"
+            >
+              Player Name
+            </label>
+            <input
+              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+              id="player-name"
+              type="text"
+              bind:value={playerNameInput}
+            />
+          </div>
+          <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
+            <label
+              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+              for="grid-first-name"
+            >
+              Size
+            </label>
+            <input
+              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+              id="grid-first-name"
+              type="number"
+              inputmode="numeric"
+              bind:value={numCellsInput}
+              min="100"
+              max="4096"
+              step="1"
+            />
+          </div>
+          <div class="w-full px-3 md:w-1/2">
+            <label
+              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+              for="grid-last-name"
+            >
+              RNG Seed
+            </label>
+            <input
+              class="block w-full appearance-none rounded border border-gray-200 bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:border-gray-500 focus:bg-white focus:outline-none"
+              id="grid-last-name"
+              type="number"
+              inputmode="numeric"
+              bind:value={rngSeedInput}
+              min="0"
+            />
+          </div>
         </div>
-        <div class="w-full px-3 md:w-1/2">
-          <label
-            class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-            for="grid-last-name"
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+            type="button"
+            onclick={startGame}
           >
-            RNG Seed
-          </label>
-          <input
-            class="block w-full appearance-none rounded border border-gray-200 bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:border-gray-500 focus:bg-white focus:outline-none"
-            id="grid-last-name"
-            type="number"
-            inputmode="numeric"
-            bind:value={rngSeedInput}
-            min="0"
-          />
+            Start
+          </button>
         </div>
+      </form>
+    {:else if gameConfig === "join"}
+      <form class="w-full max-w-lg">
+        <div class="-mx-3 mb-2 flex flex-wrap">
+          <div class="mb-6 w-full px-3 md:mb-0">
+            <label
+              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+              for="join-player-name"
+            >
+              Player Name
+            </label>
+            <input
+              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+              id="join-player-name"
+              type="text"
+              bind:value={playerNameInput}
+            />
+          </div>
+          <div class="mb-6 w-full px-3 md:mb-0">
+            <label
+              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+              for="grid-first-name"
+            >
+              Ticket
+            </label>
+            <input
+              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+              id="grid-first-name"
+              type="text"
+              bind:value={ticketInput}
+            />
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+            type="button"
+            onclick={joinGame}
+          >
+            Join
+          </button>
+        </div>
+      </form>
+    {:else}
+      <button
+        class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+        type="button"
+        onclick={() => (gameConfig = "host")}
+      >
+        New Game
+      </button>
+      <button
+        class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+        type="button"
+        onclick={() => (gameConfig = "join")}
+      >
+        Join Game
+      </button>
+    {/if}
+  {:else}
+    <button
+      class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+      type="button"
+      onclick={async () => {
+        try {
+          inviteTicket = (await gameState?.invite(playerNameInput)) ?? "";
+        } catch (error) {
+          console.error("Failed to create invitation", error);
+        }
+      }}
+    >
+      Invite Player
+    </button>
+
+    {#if inviteTicket}
+      <div class="mt-3">
+        <label class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase" for="invite-ticket">
+          Invitation Ticket
+        </label>
+        <input
+          id="invite-ticket"
+          class="mb-2 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+          type="text"
+          readonly
+          value={inviteTicket}
+        />
       </div>
-      <div class="flex flex-wrap gap-2">
-        <button
-          class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-          type="button"
-          onclick={startGame}
-        >
-          Start Game
-        </button>
-      </div>
-    </form>
+    {/if}
   {/if}
 </div>
 
