@@ -1,4 +1,5 @@
 mod listener;
+mod mutation;
 mod utils;
 
 use std::{cell::RefCell, rc::Rc};
@@ -17,127 +18,18 @@ use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 mod net;
+use mutation::{Mutation, MutationOrigin, apply_mutation_with_effects};
 use net::{NetworkNode, TicketOpts};
 use networking::GameTicket;
 use wasm_bindgen::{JsCast, JsValue};
 
 const MESSAGE_RECEIVED_EVENT: &str = "messageReceived";
-const MUTATION_DELIMITER: char = '|';
 const PULSE_DURATION_MS: u32 = 250; // TODO: Decrease after testing
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT_TYPES: &str = r#"
 import type { Readable } from "svelte/store";
 "#;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum MutationKind {
-    Cell = 0,
-}
-
-impl MutationKind {
-    fn to_wire(self) -> u8 {
-        self as u8
-    }
-
-    fn from_wire(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::Cell),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum CellMutationOp {
-    ExploreCell = 0,
-}
-
-impl CellMutationOp {
-    fn to_wire(self) -> u8 {
-        self as u8
-    }
-
-    fn from_wire(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::ExploreCell),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Mutation {
-    ExploreCell {
-        index: usize,
-        pulse_position: [f64; 3],
-    },
-}
-
-impl Mutation {
-    fn encode(self) -> String {
-        match self {
-            Self::ExploreCell {
-                index,
-                pulse_position: [x, y, z],
-            } => format!(
-                "{}{}{}{}{}{}{}{}{}{}{}",
-                MutationKind::Cell.to_wire(),
-                MUTATION_DELIMITER,
-                CellMutationOp::ExploreCell.to_wire(),
-                MUTATION_DELIMITER,
-                index,
-                MUTATION_DELIMITER,
-                x,
-                MUTATION_DELIMITER,
-                y,
-                MUTATION_DELIMITER,
-                z
-            ),
-        }
-    }
-
-    fn decode(input: &str) -> Option<Self> {
-        let mut parts = input.split(MUTATION_DELIMITER);
-        let kind: u8 = parts.next()?.parse().ok()?;
-        let op: u8 = parts.next()?.parse().ok()?;
-
-        let mutation = match MutationKind::from_wire(kind)? {
-            MutationKind::Cell => match CellMutationOp::from_wire(op)? {
-                CellMutationOp::ExploreCell => {
-                    let index: usize = parts.next()?.parse().ok()?;
-                    let x: f64 = parts.next()?.parse().ok()?;
-                    let y: f64 = parts.next()?.parse().ok()?;
-                    let z: f64 = parts.next()?.parse().ok()?;
-                    Self::ExploreCell {
-                        index,
-                        pulse_position: [x, y, z],
-                    }
-                }
-            },
-        };
-
-        if parts.next().is_some() {
-            return None;
-        }
-
-        Some(mutation)
-    }
-
-    fn apply(self, cells: &Rc<RefCell<Readable<Array>>>) -> Result<(), JsValue> {
-        match self {
-            Self::ExploreCell { index, .. } => mark_cell_explored(cells, index),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MutationOrigin {
-    Local,
-    Peer,
-}
 
 #[derive(Serialize, Tsify)]
 #[tsify(into_wasm_abi)]
@@ -648,52 +540,6 @@ impl GameState {
             }
         });
     }
-}
-
-fn apply_mutation_with_effects(
-    cells: &Rc<RefCell<Readable<Array>>>,
-    ui_state: &UiState,
-    mutation: Mutation,
-    origin: MutationOrigin,
-) -> Result<(), JsValue> {
-    let is_remote = matches!(origin, MutationOrigin::Peer);
-    let (index, [x, y, z]) = match mutation {
-        Mutation::ExploreCell {
-            index,
-            pulse_position,
-        } => (index, pulse_position),
-    };
-
-    ui_state
-        .add_pulse_internal(index, x, y, z, PULSE_DURATION_MS, is_remote)
-        .map(|_| ())?;
-
-    let delayed_cells = cells.clone();
-    spawn_local(async move {
-        n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
-        if let Err(err) = mutation.apply(&delayed_cells) {
-            tracing::warn!("failed to apply delayed mutation: {:?}", err);
-        }
-    });
-
-    Ok(())
-}
-
-fn mark_cell_explored(cells: &Rc<RefCell<Readable<Array>>>, index: usize) -> Result<(), JsValue> {
-    cells.borrow_mut().set_with(|cells_array| {
-        if index >= cells_array.length() as usize {
-            return Ok::<(), JsValue>(());
-        }
-
-        let cell = cells_array.get(index as u32);
-        Reflect::set(
-            &cell,
-            &JsValue::from_str("isExplored"),
-            &JsValue::from_bool(true),
-        )?;
-
-        Ok(())
-    })
 }
 
 /// Computes terrain elevation for a world-space point using layered value noise.

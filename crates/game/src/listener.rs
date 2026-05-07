@@ -6,9 +6,8 @@ use svelte_store::Readable;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::{
-    MESSAGE_RECEIVED_EVENT, Mutation, MutationOrigin, UiState, apply_mutation_with_effects,
-};
+use crate::mutation::{Mutation, MutationOrigin, apply_mutation_with_effects};
+use crate::{MESSAGE_RECEIVED_EVENT, UiState};
 
 struct NetworkTextMessage {
     from: Option<String>,
