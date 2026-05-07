@@ -1,6 +1,10 @@
 mod utils;
 
+use std::default;
+use std::{cell::RefCell, rc::Rc};
+
 use bluenoise::BlueNoise;
+use futures_util::StreamExt;
 use js_sys::{Array, JSON, Object, Reflect};
 use rand::RngCore;
 use rand::SeedableRng;
@@ -9,10 +13,109 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use svelte_store::Readable;
 use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 mod net;
 use net::{NetworkNode, TicketOpts};
 use networking::GameTicket;
 use wasm_bindgen::{JsCast, JsValue};
+
+const MESSAGE_RECEIVED_EVENT: &str = "messageReceived";
+const MUTATION_DELIMITER: char = '|';
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum MutationKind {
+    Cell = 0,
+}
+
+impl MutationKind {
+    fn to_wire(self) -> u8 {
+        self as u8
+    }
+
+    fn from_wire(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Cell),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum CellMutationOp {
+    ExploreCell = 0,
+}
+
+impl CellMutationOp {
+    fn to_wire(self) -> u8 {
+        self as u8
+    }
+
+    fn from_wire(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::ExploreCell),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mutation {
+    ExploreCell { index: usize },
+}
+
+impl Mutation {
+    fn encode(self) -> String {
+        match self {
+            Self::ExploreCell { index } => format!(
+                "{}{}{}{}{}",
+                MutationKind::Cell.to_wire(),
+                MUTATION_DELIMITER,
+                CellMutationOp::ExploreCell.to_wire(),
+                MUTATION_DELIMITER,
+                index
+            ),
+        }
+    }
+
+    fn decode(input: &str) -> Option<Self> {
+        let mut parts = input.split(MUTATION_DELIMITER);
+        let kind: u8 = parts.next()?.parse().ok()?;
+        let op: u8 = parts.next()?.parse().ok()?;
+
+        let mutation = match MutationKind::from_wire(kind)? {
+            MutationKind::Cell => match CellMutationOp::from_wire(op)? {
+                CellMutationOp::ExploreCell => {
+                    let index: usize = parts.next()?.parse().ok()?;
+                    Self::ExploreCell { index }
+                }
+            },
+        };
+
+        if parts.next().is_some() {
+            return None;
+        }
+
+        Some(mutation)
+    }
+
+    fn apply(self, cells: &Rc<RefCell<Readable<Array>>>) -> Result<(), JsValue> {
+        match self {
+            Self::ExploreCell { index } => mark_cell_explored(cells, index),
+        }
+    }
+}
+
+enum MutationOrigin {
+    Local,
+    Peer,
+}
+
+struct NetworkTextMessage {
+    from: Option<String>,
+    text: String,
+}
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT_TYPES: &str = r#"
@@ -40,12 +143,13 @@ export interface MapCell {
 
 #[wasm_bindgen]
 pub struct GameState {
-    cells: Readable<Array>,
+    cells: Rc<RefCell<Readable<Array>>>,
     num_cells: u64,
     rng_seed: u64,
     max_samples: u32,
     network_node: Option<NetworkNode>,
     network_channel: Option<net::Channel>,
+    network_listener_started: bool,
     game_options_json: String,
     slack: f32,
     spikiness: f64,
@@ -127,7 +231,7 @@ impl GameState {
             .unwrap_or(0.4);
 
         Ok(GameState {
-            cells: Readable::new(Array::new()),
+            cells: Rc::new(RefCell::new(Readable::new(Array::new()))),
             num_cells: num_cells,
             rng_seed: rng_seed,
             max_samples,
@@ -137,13 +241,14 @@ impl GameState {
             elevation_max,
             network_node: None,
             network_channel: None,
+            network_listener_started: false,
             game_options_json: options_json,
         })
     }
 
     #[wasm_bindgen(getter, js_name = cells)]
     pub fn cells_store(&self) -> MapCells {
-        self.cells.get_store().into()
+        self.cells.borrow().get_store().into()
     }
 
     #[wasm_bindgen(getter, js_name = "elevationMin")]
@@ -206,32 +311,13 @@ impl GameState {
             )));
         }
 
-        self.cells.set(output_cells.clone());
+        self.cells.borrow_mut().set(output_cells.clone());
         Ok(output_cells.into())
     }
 
     #[wasm_bindgen(js_name = "exploreCell")]
     pub fn explore_cell(&mut self, index: usize) -> Result<(), JsValue> {
-        self.cells.set_with(|cells_array| {
-            let cell = cells_array.get(index as u32);
-            Reflect::set(
-                &cell,
-                &JsValue::from_str("isExplored"),
-                &JsValue::from_bool(true),
-            )?;
-            Ok(())
-        })
-    }
-
-    #[wasm_bindgen(js_name = "startNetworkNode")]
-    pub async fn start_network_node(&mut self) -> Result<(), JsValue> {
-        if self.network_node.is_some() {
-            tracing::info!("start_network_node called but network node already exists");
-            return Ok(());
-        }
-        let node = NetworkNode::spawn().await.map_err(js_err_to_value)?;
-        self.network_node = Some(node);
-        Ok(())
+        self.apply_mutation_with_origin(Mutation::ExploreCell { index }, MutationOrigin::Local)
     }
 
     #[wasm_bindgen(js_name = "invite")]
@@ -248,6 +334,7 @@ impl GameState {
                 .ok_or_else(|| JsValue::from_str("Network node is unavailable"))?;
             let channel = node.create(nickname).await.map_err(js_err_to_value)?;
             self.network_channel = Some(channel);
+            self.attach_network_listener();
         }
 
         let channel = self
@@ -280,9 +367,135 @@ impl GameState {
         let channel = node.join(ticket, nickname).await.map_err(js_err_to_value)?;
         state.network_node = Some(node);
         state.network_channel = Some(channel);
+        state.attach_network_listener();
 
         Ok(state)
     }
+}
+
+impl GameState {
+    fn attach_network_listener(&mut self) {
+        if self.network_listener_started {
+            return;
+        }
+
+        let Some(channel) = self.network_channel.as_mut() else {
+            return;
+        };
+
+        let cells = self.cells.clone();
+        let local_endpoint_id = self.network_node.as_ref().map(|node| node.endpoint_id());
+        let receiver = channel.receiver();
+        self.network_listener_started = true;
+
+        spawn_local(async move {
+            let mut stream = wasm_streams::ReadableStream::from_raw(receiver).into_stream();
+            while let Some(event_result) = stream.next().await {
+                match event_result {
+                    Ok(event) => {
+                        if let Some(message) = extract_message_text(&event) {
+                            if message
+                                .from
+                                .as_deref()
+                                .zip(local_endpoint_id.as_deref())
+                                .is_some_and(|(from, local)| from == local)
+                            {
+                                continue;
+                            }
+
+                            if let Err(err) = apply_incoming_mutation(
+                                &cells,
+                                MutationOrigin::Peer,
+                                &message.text,
+                            ) {
+                                tracing::warn!("failed to apply state mutation from peer: {:?}", err);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!("network event stream error: {:?}", err);
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    fn apply_mutation_with_origin(
+        &self,
+        mutation: Mutation,
+        origin: MutationOrigin,
+    ) -> Result<(), JsValue> {
+        mutation.apply(&self.cells)?;
+
+        if match origin { MutationOrigin::Local => true, _ => false } {
+            self.broadcast_state_mutation(mutation);
+        }
+
+        Ok(())
+    }
+
+    fn broadcast_state_mutation(&self, mutation: Mutation) {
+        let Some(channel) = self.network_channel.as_ref() else {
+            return;
+        };
+
+        let sender = channel.sender();
+        let payload = mutation.encode();
+
+        spawn_local(async move {
+            if let Err(err) = sender.broadcast(payload).await {
+                tracing::warn!("failed to broadcast state mutation: {:?}", err);
+            }
+        });
+    }
+}
+
+fn extract_message_text(event: &JsValue) -> Option<NetworkTextMessage> {
+    let event_type = Reflect::get(event, &JsValue::from_str("type"))
+        .ok()?
+        .as_string()?;
+    if event_type != MESSAGE_RECEIVED_EVENT {
+        return None;
+    }
+
+    let text = Reflect::get(event, &JsValue::from_str("text"))
+        .ok()?
+        .as_string()?;
+    let from = Reflect::get(event, &JsValue::from_str("from"))
+        .ok()
+        .and_then(|value| value.as_string());
+
+    Some(NetworkTextMessage { from, text })
+}
+
+fn apply_incoming_mutation(
+    cells: &Rc<RefCell<Readable<Array>>>,
+    _origin: MutationOrigin,
+    message_text: &str,
+) -> Result<(), JsValue> {
+    let Some(mutation) = Mutation::decode(message_text) else {
+        return Ok(());
+    };
+
+    mutation.apply(cells)
+}
+
+fn mark_cell_explored(cells: &Rc<RefCell<Readable<Array>>>, index: usize) -> Result<(), JsValue> {
+    cells.borrow_mut().set_with(|cells_array| {
+        if index >= cells_array.length() as usize {
+            return Ok::<(), JsValue>(());
+        }
+
+        let cell = cells_array.get(index as u32);
+        Reflect::set(
+            &cell,
+            &JsValue::from_str("isExplored"),
+            &JsValue::from_bool(true),
+        )?;
+
+        Ok(())
+    })
 }
 
 fn js_err_to_value(err: wasm_bindgen::JsError) -> JsValue {

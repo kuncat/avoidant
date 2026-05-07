@@ -17,7 +17,7 @@ fn start() {
     tracing_subscriber::fmt()
         .with_max_level(LevelFilter::DEBUG)
         .with_writer(
-            // To avoide trace events in the browser from showing their JS backtrace
+            // To avoid trace events in the browser from showing their JS backtrace
             MakeConsoleWriter::default().map_trace_level_to(tracing::Level::DEBUG),
         )
         // If we don't do this in the browser, we get a runtime error.
