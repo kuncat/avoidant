@@ -1,24 +1,24 @@
+mod game_network;
 mod listener;
 mod mapgen;
 mod mutation;
+mod ui_state;
 mod utils;
 
 use std::{cell::RefCell, rc::Rc};
 
-use js_sys::{Array, JSON, Reflect};
-use n0_future::time::Duration;
+use js_sys::{Array, JSON};
 use serde::{Deserialize, Serialize};
 use svelte_store::Readable;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
 mod net;
-use mutation::{Mutation, MutationOrigin, apply_mutation_with_effects};
+use mutation::{Mutation, MutationOrigin};
 use net::{NetworkNode, TicketOpts};
 use networking::GameTicket;
-use wasm_bindgen::{JsCast, JsValue};
+pub use ui_state::UiState;
+use wasm_bindgen::JsValue;
 
-const MESSAGE_RECEIVED_EVENT: &str = "messageReceived";
 const PULSE_DURATION_MS: u32 = 250; // TODO: Decrease after testing
 
 #[wasm_bindgen(typescript_custom_section)]
@@ -68,7 +68,7 @@ pub struct Pulse {
 }
 
 impl Pulse {
-    fn new(
+    pub(crate) fn new(
         id: u32,
         origin_cell: usize,
         position: [f64; 3],
@@ -136,13 +136,6 @@ impl Pulse {
     }
 }
 
-#[derive(Clone)]
-#[wasm_bindgen]
-pub struct UiState {
-    pulses: Rc<RefCell<Readable<Array>>>,
-    next_pulse_id: Rc<RefCell<u32>>,
-}
-
 #[wasm_bindgen]
 pub struct GameState {
     cells: Rc<RefCell<Readable<Array>>>,
@@ -167,114 +160,6 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "Readable<Array<Pulse>>")]
     pub type Pulses;
-}
-
-#[wasm_bindgen]
-impl UiState {
-    #[wasm_bindgen(getter, js_name = pulses)]
-    pub fn pulses_store(&self) -> Pulses {
-        self.pulses.borrow().get_store().into()
-    }
-
-    #[wasm_bindgen(js_name = "addPulse")]
-    pub fn add_pulse(
-        &self,
-        origin_cell: usize,
-        x: f64,
-        y: f64,
-        z: f64,
-        duration_ms: u32,
-    ) -> Result<u32, JsValue> {
-        self.add_pulse_internal(origin_cell, x, y, z, duration_ms, false)
-    }
-}
-
-impl UiState {
-    fn add_pulse_internal(
-        &self,
-        origin_cell: usize,
-        x: f64,
-        y: f64,
-        z: f64,
-        duration_ms: u32,
-        is_remote: bool,
-    ) -> Result<u32, JsValue> {
-        let mut next_pulse_id = self.next_pulse_id.borrow_mut();
-        let pulse_id = *next_pulse_id;
-        *next_pulse_id = next_pulse_id.wrapping_add(1);
-
-        let created_at_ms = monotonic_now_ms();
-        let pulse = Pulse::new(
-            pulse_id,
-            origin_cell,
-            [x, y, z],
-            created_at_ms,
-            duration_ms,
-            is_remote,
-        );
-        let pulse: JsValue = pulse.into();
-        self.pulses.borrow_mut().set_with(|pulses_array| {
-            pulses_array.push(pulse.as_ref());
-        });
-
-        let ui_state = self.clone();
-        spawn_local(async move {
-            n0_future::time::sleep(Duration::from_millis(duration_ms as u64)).await;
-            if let Err(err) = ui_state.remove_pulse_by_id(pulse_id) {
-                tracing::warn!("failed to remove expired pulse: {:?}", err);
-            }
-        });
-
-        Ok(pulse_id)
-    }
-}
-
-fn monotonic_now_ms() -> f64 {
-    let global = js_sys::global();
-    let performance = Reflect::get(&global, &JsValue::from_str("performance"))
-        .ok()
-        .filter(|value| !value.is_null() && !value.is_undefined());
-
-    if let Some(performance) = performance {
-        let now_fn = Reflect::get(&performance, &JsValue::from_str("now"))
-            .ok()
-            .and_then(|value| value.dyn_into::<js_sys::Function>().ok());
-        if let Some(now_fn) = now_fn {
-            if let Ok(result) = now_fn.call0(&performance) {
-                if let Some(ms) = result.as_f64() {
-                    return ms;
-                }
-            }
-        }
-    }
-
-    js_sys::Date::now()
-}
-
-impl UiState {
-    fn new() -> Self {
-        Self {
-            pulses: Rc::new(RefCell::new(Readable::new(Array::new()))),
-            next_pulse_id: Rc::new(RefCell::new(0)),
-        }
-    }
-
-    fn remove_pulse_by_id(&self, pulse_id: u32) -> Result<(), JsValue> {
-        self.pulses.borrow_mut().set_with(|pulses_array| {
-            let filtered = Array::new();
-            for idx in 0..pulses_array.length() {
-                let pulse = pulses_array.get(idx);
-                let id = Reflect::get(&pulse, &JsValue::from_str("id"))?
-                    .as_f64()
-                    .unwrap_or(-1.0) as u32;
-                if id != pulse_id {
-                    filtered.push(&pulse);
-                }
-            }
-            *pulses_array = filtered;
-            Ok::<(), JsValue>(())
-        })
-    }
 }
 
 impl MapCell {
@@ -447,54 +332,5 @@ impl GameState {
         state.attach_network_listener();
 
         Ok(state)
-    }
-}
-
-impl GameState {
-    fn attach_network_listener(&mut self) {
-        if self.network_listener_started {
-            return;
-        }
-
-        let Some(channel) = self.network_channel.as_mut() else {
-            return;
-        };
-
-        let cells = self.cells.clone();
-        let ui_state = self.ui_state.clone();
-        let local_endpoint_id = self.network_node.as_ref().map(|node| node.endpoint_id());
-        let receiver = channel.receiver();
-        self.network_listener_started = true;
-
-        listener::spawn_network_listener(receiver, cells, ui_state, local_endpoint_id);
-    }
-
-    fn dispatch_explore_mutation(
-        &self,
-        mutation: Mutation,
-        origin: MutationOrigin,
-    ) -> Result<(), JsValue> {
-        apply_mutation_with_effects(&self.cells, &self.ui_state, mutation, origin)?;
-
-        if matches!(origin, MutationOrigin::Local) {
-            self.broadcast_state_mutation(mutation);
-        }
-
-        Ok(())
-    }
-
-    fn broadcast_state_mutation(&self, mutation: Mutation) {
-        let Some(channel) = self.network_channel.as_ref() else {
-            return;
-        };
-
-        let sender = channel.sender();
-        let payload = mutation.encode();
-
-        spawn_local(async move {
-            if let Err(err) = sender.broadcast(payload).await {
-                tracing::warn!("failed to broadcast state mutation: {:?}", err);
-            }
-        });
     }
 }
