@@ -61,7 +61,13 @@
     <p>Loading...</p>
   {:else if !gameState}
     {#if gameConfig === "host"}
-      <form class="w-full max-w-lg">
+      <form
+        class="w-full max-w-lg"
+        onsubmit={(event) => {
+          event.preventDefault();
+          startGame();
+        }}
+      >
         <div class="-mx-3 mb-2 flex flex-wrap">
           <div class="mb-6 w-full px-3 md:mb-0">
             <label
@@ -115,15 +121,20 @@
         <div class="flex flex-wrap gap-2">
           <button
             class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-            type="button"
-            onclick={startGame}
+            type="submit"
           >
             Start
           </button>
         </div>
       </form>
     {:else if gameConfig === "join"}
-      <form class="w-full max-w-lg">
+      <form
+        class="w-full max-w-lg"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void joinGame();
+        }}
+      >
         <div class="-mx-3 mb-2 flex flex-wrap">
           <div class="mb-6 w-full px-3 md:mb-0">
             <label
@@ -157,8 +168,7 @@
         <div class="flex flex-wrap gap-2">
           <button
             class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-            type="button"
-            onclick={joinGame}
+            type="submit"
           >
             Join
           </button>
