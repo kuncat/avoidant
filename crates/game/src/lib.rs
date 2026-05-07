@@ -133,6 +133,7 @@ impl Mutation {
     }
 }
 
+#[derive(Clone, Copy)]
 enum MutationOrigin {
     Local,
     Peer,
@@ -663,28 +664,11 @@ impl GameState {
         mutation: Mutation,
         origin: MutationOrigin,
     ) -> Result<(), JsValue> {
-        let is_remote = matches!(origin, MutationOrigin::Peer);
-        let (index, [x, y, z]) = match mutation {
-            Mutation::ExploreCell {
-                index,
-                pulse_position,
-            } => (index, pulse_position),
-        };
-        self.ui_state
-            .add_pulse_internal(index, x, y, z, PULSE_DURATION_MS, is_remote)
-            .map(|_| ())?;
+        apply_mutation_with_effects(&self.cells, &self.ui_state, mutation, origin)?;
 
         if matches!(origin, MutationOrigin::Local) {
             self.broadcast_state_mutation(mutation);
         }
-
-        let cells = self.cells.clone();
-        spawn_local(async move {
-            n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
-            if let Err(err) = mutation.apply(&cells) {
-                tracing::warn!("failed to apply delayed mutation: {:?}", err);
-            }
-        });
 
         Ok(())
     }
@@ -703,6 +687,35 @@ impl GameState {
             }
         });
     }
+}
+
+fn apply_mutation_with_effects(
+    cells: &Rc<RefCell<Readable<Array>>>,
+    ui_state: &UiState,
+    mutation: Mutation,
+    origin: MutationOrigin,
+) -> Result<(), JsValue> {
+    let is_remote = matches!(origin, MutationOrigin::Peer);
+    let (index, [x, y, z]) = match mutation {
+        Mutation::ExploreCell {
+            index,
+            pulse_position,
+        } => (index, pulse_position),
+    };
+
+    ui_state
+        .add_pulse_internal(index, x, y, z, PULSE_DURATION_MS, is_remote)
+        .map(|_| ())?;
+
+    let delayed_cells = cells.clone();
+    spawn_local(async move {
+        n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
+        if let Err(err) = mutation.apply(&delayed_cells) {
+            tracing::warn!("failed to apply delayed mutation: {:?}", err);
+        }
+    });
+
+    Ok(())
 }
 
 fn extract_message_text(event: &JsValue) -> Option<NetworkTextMessage> {
@@ -733,27 +746,7 @@ fn apply_incoming_mutation(
         return Ok(());
     };
 
-    let is_remote = matches!(origin, MutationOrigin::Peer);
-    let (index, [x, y, z]) = match mutation {
-        Mutation::ExploreCell {
-            index,
-            pulse_position,
-        } => (index, pulse_position),
-    };
-
-    ui_state
-        .add_pulse_internal(index, x, y, z, PULSE_DURATION_MS, is_remote)
-        .map(|_| ())?;
-
-    let delayed_cells = cells.clone();
-    spawn_local(async move {
-        n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
-        if let Err(err) = mutation.apply(&delayed_cells) {
-            tracing::warn!("failed to apply delayed incoming mutation: {:?}", err);
-        }
-    });
-
-    Ok(())
+    apply_mutation_with_effects(cells, ui_state, mutation, origin)
 }
 fn mark_cell_explored(cells: &Rc<RefCell<Readable<Array>>>, index: usize) -> Result<(), JsValue> {
     cells.borrow_mut().set_with(|cells_array| {
