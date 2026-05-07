@@ -4,6 +4,12 @@
 
 ### Prerequisites
 
+WebAssembly compilation target
+
+```sh
+rustup target add wasm32-unknown-unknown
+```
+
 wasm-pack
 
 ```sh
