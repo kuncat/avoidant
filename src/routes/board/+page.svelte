@@ -14,20 +14,135 @@
   let gameConfig: "host" | "join" | undefined = $state(undefined);
   let ticketInput = $state("");
   let inviteTicket = $state("");
+  let nowMs = $state(Date.now());
 
-  onMount(async () => {
-    try {
-      status = "Loading...";
-      await init();
+  // const EMPTY_NETWORK_SNAPSHOT: WasmNetworkSnapshot = {
+  //   hasNode: false,
+  //   listenerStarted: false,
+  //   endpointId: undefined,
+  //   topicId: undefined,
+  //   peers: [],
+  //   lastInboundMutationMs: undefined,
+  //   lastOutboundMutationMs: undefined,
+  //   sampledAtMs: Date.now(),
+  // };
 
-      status = "Starting worker threads...";
-      const threadCount = Math.max(2, navigator.hardwareConcurrency ?? 4);
-      await initWasmThreadPool(threadCount);
-      status = undefined;
-    } catch (error) {
-      status = "Failed to initialize wasm thread pool.";
-      console.error("Failed to initialize wasm", error);
+  // let networkSnapshotStore = $derived(gameState?.networkSnapshot);
+  // let networkSnapshot = $derived($networkSnapshotStore ?? EMPTY_NETWORK_SNAPSHOT); // TODO: Remove EMPTY_NETWORK_SNAPSHOT
+  let networkSnapshot = $derived(gameState?.networkSnapshot);
+
+  let hasSeenConnectedPeers = $state(false);
+
+  let connectedPeers = $derived(
+    ($networkSnapshot?.peers ?? [])
+      .filter((peer) => peer.isConnected)
+      .sort((left, right) => {
+        const leftName = (left.nickname ?? left.endpointId).toLowerCase();
+        const rightName = (right.nickname ?? right.endpointId).toLowerCase();
+        return leftName.localeCompare(rightName);
+      }),
+  );
+
+  let connectionDroppedWarning = $derived(
+    $networkSnapshot?.hasNode &&
+      $networkSnapshot?.listenerStarted &&
+      hasSeenConnectedPeers &&
+      connectedPeers.length === 0,
+  );
+
+  let connectionSummary = $derived.by(() => {
+    if (!gameState) {
+      return "No active game session.";
     }
+
+    if (!$networkSnapshot?.hasNode) {
+      return "Not connected yet. Host must create/invite, or joiner must join ticket.";
+    }
+
+    if (!$networkSnapshot?.listenerStarted) {
+      return "Network listener is starting...";
+    }
+
+    const peerCount = connectedPeers.length;
+    if (peerCount === 0) {
+      return "Connected to session; waiting for peers.";
+    }
+
+    return `Connected to ${peerCount} peer${peerCount === 1 ? "" : "s"}.`;
+  });
+
+  function shortenEndpointId(endpointId: string): string {
+    if (endpointId.length <= 18) {
+      return endpointId;
+    }
+
+    return `${endpointId.slice(0, 9)}...${endpointId.slice(-9)}`;
+  }
+
+  function formatMutationAge(lastMutationMs: number | undefined, referenceMs: number): string {
+    if (lastMutationMs === undefined) {
+      return "never";
+    }
+
+    const elapsedMs = Math.max(0, referenceMs - lastMutationMs);
+    if (elapsedMs < 1000) {
+      return `${Math.round(elapsedMs)}ms ago`;
+    }
+
+    if (elapsedMs < 10_000) {
+      return `${(elapsedMs / 1000).toFixed(1)}s ago`;
+    }
+
+    if (elapsedMs < 60_000) {
+      return `${Math.round(elapsedMs / 1000)}s ago`;
+    }
+
+    return `${Math.round(elapsedMs / 60_000)}m ago`;
+  }
+
+  let timeSinceLastInboundMutation = $derived(
+    formatMutationAge($networkSnapshot?.lastInboundMutationMs, nowMs),
+  );
+  let timeSinceLastOutboundMutation = $derived(
+    formatMutationAge($networkSnapshot?.lastOutboundMutationMs, nowMs),
+  );
+
+  $effect(() => {
+    if (!gameState) {
+      hasSeenConnectedPeers = false;
+      return;
+    }
+
+    if (connectedPeers.length > 0) {
+      hasSeenConnectedPeers = true;
+    }
+  });
+
+  onMount(() => {
+    const clockIntervalId = window.setInterval(() => {
+      nowMs = Date.now();
+    }, 250);
+
+    const initializeWasm = async () => {
+      try {
+        status = "Loading...";
+        await init();
+
+        status = "Starting worker threads...";
+        const threadCount = Math.max(2, navigator.hardwareConcurrency ?? 4);
+        await initWasmThreadPool(threadCount);
+        status = undefined;
+      } catch (error) {
+        status = "Failed to initialize wasm thread pool.";
+        console.error("Failed to initialize wasm", error);
+      }
+    };
+
+    void initializeWasm();
+
+    return () => {
+      clearInterval(clockIntervalId);
+    };
   });
 
   async function startGame() {
@@ -65,180 +180,227 @@
   }
 </script>
 
-<div
+<details
   class="fixed top-4 left-4 z-10 max-w-lg rounded border border-gray-400 bg-white p-4"
-  class:opacity-50={gameState}
+  class:opacity-85={gameState}
 >
-  <h1>Avoidant</h1>
-
-  {#if status}
-    <p>{status}</p>
-  {/if}
-  {#if !gameState}
-    {#if gameConfig === "host"}
-      <form
-        class="w-full max-w-lg"
-        onsubmit={async (event) => {
-          event.preventDefault();
-          await startGame();
-        }}
-      >
-        <div class="-mx-3 mb-2 flex flex-wrap">
-          <div class="mb-6 w-full px-3 md:mb-0">
-            <label
-              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-              for="player-name"
-            >
-              Player Name
-            </label>
-            <input
-              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-              id="player-name"
-              type="text"
-              bind:value={playerNameInput}
-            />
+  <summary><h1>Avoidant</h1></summary>
+  <div>
+    {#if status}
+      <p>{status}</p>
+    {/if}
+    {#if !gameState}
+      {#if gameConfig === "host"}
+        <form
+          class="w-full max-w-lg"
+          onsubmit={async (event) => {
+            event.preventDefault();
+            await startGame();
+          }}
+        >
+          <div class="-mx-3 mb-2 flex flex-wrap">
+            <div class="mb-6 w-full px-3 md:mb-0">
+              <label
+                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+                for="player-name"
+              >
+                Player Name
+              </label>
+              <input
+                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+                id="player-name"
+                type="text"
+                bind:value={playerNameInput}
+              />
+            </div>
+            <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
+              <label
+                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+                for="grid-first-name"
+              >
+                Size
+              </label>
+              <input
+                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+                id="grid-first-name"
+                type="number"
+                inputmode="numeric"
+                bind:value={numCellsInput}
+                min="100"
+                max="4096"
+                step="1"
+              />
+            </div>
+            <div class="w-full px-3 md:w-1/2">
+              <label
+                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+                for="grid-last-name"
+              >
+                RNG Seed
+              </label>
+              <input
+                class="block w-full appearance-none rounded border border-gray-200 bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:border-gray-500 focus:bg-white focus:outline-none"
+                id="grid-last-name"
+                type="number"
+                inputmode="numeric"
+                bind:value={rngSeedInput}
+                min="0"
+              />
+            </div>
           </div>
-          <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-            <label
-              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-              for="grid-first-name"
+          <div class="flex flex-wrap gap-2">
+            <button
+              class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+              type="submit"
             >
-              Size
-            </label>
-            <input
-              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-              id="grid-first-name"
-              type="number"
-              inputmode="numeric"
-              bind:value={numCellsInput}
-              min="100"
-              max="4096"
-              step="1"
-            />
+              Start
+            </button>
           </div>
-          <div class="w-full px-3 md:w-1/2">
-            <label
-              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-              for="grid-last-name"
+        </form>
+      {:else if gameConfig === "join"}
+        <form
+          class="w-full max-w-lg"
+          onsubmit={async (event) => {
+            event.preventDefault();
+            await joinGame();
+          }}
+        >
+          <div class="-mx-3 mb-2 flex flex-wrap">
+            <div class="mb-6 w-full px-3 md:mb-0">
+              <label
+                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+                for="join-player-name"
+              >
+                Player Name
+              </label>
+              <input
+                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+                id="join-player-name"
+                type="text"
+                bind:value={playerNameInput}
+              />
+            </div>
+            <div class="mb-6 w-full px-3 md:mb-0">
+              <label
+                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+                for="grid-first-name"
+              >
+                Ticket
+              </label>
+              <input
+                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+                id="grid-first-name"
+                type="text"
+                bind:value={ticketInput}
+              />
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+              type="submit"
             >
-              RNG Seed
-            </label>
-            <input
-              class="block w-full appearance-none rounded border border-gray-200 bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:border-gray-500 focus:bg-white focus:outline-none"
-              id="grid-last-name"
-              type="number"
-              inputmode="numeric"
-              bind:value={rngSeedInput}
-              min="0"
-            />
+              Join
+            </button>
           </div>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button
-            class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-            type="submit"
-          >
-            Start
-          </button>
-        </div>
-      </form>
-    {:else if gameConfig === "join"}
-      <form
-        class="w-full max-w-lg"
-        onsubmit={async (event) => {
-          event.preventDefault();
-          await joinGame();
-        }}
-      >
-        <div class="-mx-3 mb-2 flex flex-wrap">
-          <div class="mb-6 w-full px-3 md:mb-0">
-            <label
-              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-              for="join-player-name"
-            >
-              Player Name
-            </label>
-            <input
-              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-              id="join-player-name"
-              type="text"
-              bind:value={playerNameInput}
-            />
-          </div>
-          <div class="mb-6 w-full px-3 md:mb-0">
-            <label
-              class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-              for="grid-first-name"
-            >
-              Ticket
-            </label>
-            <input
-              class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-              id="grid-first-name"
-              type="text"
-              bind:value={ticketInput}
-            />
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button
-            class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-            type="submit"
-          >
-            Join
-          </button>
-        </div>
-      </form>
+        </form>
+      {:else}
+        <button
+          class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+          type="button"
+          onclick={() => (gameConfig = "host")}
+        >
+          New Game
+        </button>
+        <button
+          class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
+          type="button"
+          onclick={() => (gameConfig = "join")}
+        >
+          Join Game
+        </button>
+      {/if}
     {:else}
       <button
         class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
         type="button"
-        onclick={() => (gameConfig = "host")}
+        onclick={async () => {
+          try {
+            inviteTicket = (await gameState?.invite(playerNameInput)) ?? "";
+          } catch (error) {
+            console.error("Failed to create invitation", error);
+          }
+        }}
       >
-        New Game
+        Invite Player
       </button>
-      <button
-        class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-        type="button"
-        onclick={() => (gameConfig = "join")}
-      >
-        Join Game
-      </button>
-    {/if}
-  {:else}
-    <button
-      class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-      type="button"
-      onclick={async () => {
-        try {
-          inviteTicket = (await gameState?.invite(playerNameInput)) ?? "";
-        } catch (error) {
-          console.error("Failed to create invitation", error);
-        }
-      }}
-    >
-      Invite Player
-    </button>
 
-    {#if inviteTicket}
-      <div class="mt-3">
-        <label
-          class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-          for="invite-ticket"
-        >
-          Invitation Ticket
-        </label>
-        <input
-          id="invite-ticket"
-          class="mb-2 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-          type="text"
-          readonly
-          value={inviteTicket}
-        />
+      {#if inviteTicket}
+        <div class="mt-3">
+          <label
+            class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
+            for="invite-ticket"
+          >
+            Invitation Ticket
+          </label>
+          <input
+            id="invite-ticket"
+            class="mb-2 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+            type="text"
+            readonly
+            value={inviteTicket}
+          />
+        </div>
+      {/if}
+
+      <div class="mt-3 rounded border border-slate-300 bg-slate-50 p-3 text-xs text-slate-700">
+        <p class="font-semibold uppercase">Network Status</p>
+        <p class="mt-1">{connectionSummary}</p>
+        {#if $networkSnapshot}
+          <p class="mt-1">
+            Last Update: {new Date($networkSnapshot?.sampledAtMs).toLocaleTimeString()}
+          </p>
+        {/if}
+        <p class="mt-1">Listener: {$networkSnapshot?.listenerStarted ? "active" : "inactive"}</p>
+        <p class="mt-1">Session Topic: {$networkSnapshot?.topicId ?? "n/a"}</p>
+        <p class="mt-1">
+          Local Endpoint: {$networkSnapshot?.endpointId
+            ? shortenEndpointId($networkSnapshot.endpointId)
+            : "n/a"}
+        </p>
+        <p class="mt-1">Connected Peers: {connectedPeers.length}</p>
+        <p class="mt-1">
+          Last Outbound Mutation: {timeSinceLastOutboundMutation}
+        </p>
+        <p class="mt-1">
+          Last Inbound Mutation: {timeSinceLastInboundMutation}
+        </p>
+
+        {#if connectionDroppedWarning}
+          <p
+            class="mt-2 rounded border border-amber-300 bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800"
+          >
+            Peer connectivity dropped to zero after being connected. Relay/session might be
+            unstable.
+          </p>
+        {/if}
+
+        {#if connectedPeers.length > 0}
+          <ul
+            class="mt-2 max-h-28 overflow-auto rounded border border-slate-200 bg-white p-2 font-mono text-[11px]"
+          >
+            {#each connectedPeers as peer (peer.endpointId)}
+              <li class="mb-1 last:mb-0" title={peer.endpointId}>
+                <span class="font-semibold">{peer.nickname ?? "Unknown Player"}</span>
+                <span class="text-slate-500"> ({shortenEndpointId(peer.endpointId)})</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </div>
     {/if}
-  {/if}
-</div>
+  </div>
+</details>
 
 {#if gameState}
   <div class="h-screen w-full p-2">

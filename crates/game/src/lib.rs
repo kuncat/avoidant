@@ -11,7 +11,11 @@ mod mutation;
 mod ui_state;
 mod utils;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, HashMap},
+    rc::Rc,
+};
 
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
@@ -47,6 +51,42 @@ pub struct MapCell {
 pub struct CellMetadataEntry {
     is_explored: bool,
     is_void: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkPeerStatus {
+    endpoint_id: String,
+    #[tsify(optional)]
+    nickname: Option<String>,
+    #[tsify(optional)]
+    last_seen_ms: Option<f64>,
+    is_connected: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSnapshot {
+    pub(crate) has_node: bool,
+    pub(crate) listener_started: bool,
+    #[tsify(optional)]
+    pub(crate) endpoint_id: Option<String>,
+    #[tsify(optional)]
+    pub(crate) topic_id: Option<String>,
+    pub(crate) peers: Vec<NetworkPeerStatus>,
+    #[tsify(optional)]
+    pub(crate) last_inbound_mutation_ms: Option<f64>,
+    #[tsify(optional)]
+    pub(crate) last_outbound_mutation_ms: Option<f64>,
+    pub(crate) sampled_at_ms: f64,
+}
+
+#[derive(Default, Clone)]
+pub(crate) struct PeerPresenceEntry {
+    pub(crate) nickname: Option<String>,
+    pub(crate) last_seen_ms: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Tsify)]
@@ -154,6 +194,11 @@ impl Pulse {
 pub struct GameState {
     cells: Rc<RefCell<Readable<Array>>>,
     cell_metadata: Rc<RefCell<Readable<Array>>>,
+    network_snapshot: Rc<RefCell<Readable<NetworkSnapshot>>>,
+    connected_endpoints: Rc<RefCell<BTreeSet<String>>>,
+    peer_presence: Rc<RefCell<HashMap<String, PeerPresenceEntry>>>,
+    last_inbound_mutation_ms: Rc<RefCell<Option<f64>>>,
+    last_outbound_mutation_ms: Rc<RefCell<Option<f64>>>,
     ui_state: UiState,
     num_cells: u64,
     rng_seed: u64,
@@ -176,6 +221,9 @@ extern "C" {
     #[wasm_bindgen(typescript_type = "Readable<Array<CellMetadataEntry>>")]
     pub type CellMetadata;
 
+    #[wasm_bindgen(typescript_type = "Readable<NetworkSnapshot>")]
+    pub type NetworkSnapshotStore;
+
     #[wasm_bindgen(typescript_type = "Readable<Array<Pulse>>")]
     pub type Pulses;
 }
@@ -196,5 +244,36 @@ impl CellMetadataEntry {
 
     pub(crate) fn mark_explored(&mut self) {
         self.is_explored = true;
+    }
+}
+
+impl NetworkPeerStatus {
+    pub(crate) fn new(
+        endpoint_id: String,
+        nickname: Option<String>,
+        last_seen_ms: Option<f64>,
+        is_connected: bool,
+    ) -> Self {
+        Self {
+            endpoint_id,
+            nickname,
+            last_seen_ms,
+            is_connected,
+        }
+    }
+}
+
+impl NetworkSnapshot {
+    pub(crate) fn empty() -> Self {
+        Self {
+            has_node: false,
+            listener_started: false,
+            endpoint_id: None,
+            topic_id: None,
+            peers: Vec::new(),
+            last_inbound_mutation_ms: None,
+            last_outbound_mutation_ms: None,
+            sampled_at_ms: js_sys::Date::now(),
+        }
     }
 }
