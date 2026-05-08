@@ -1,4 +1,6 @@
 use bluenoise::BlueNoise;
+#[cfg(target_arch = "wasm32")]
+use futures_channel::oneshot;
 use rand::RngCore;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
@@ -26,6 +28,58 @@ pub(crate) fn generate_map_cells(
         elevation_range,
     )
     .map_err(|err| JsValue::from_str(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn generate_map_cells_async(
+    requested_cell_count: usize,
+    rng_seed: u64,
+    max_samples: u32,
+    slack: f32,
+    spikiness: f64,
+    elevation_range: (f64, f64),
+) -> Result<Vec<MapCell>, JsValue> {
+    if rayon::current_num_threads() <= 1 {
+        return Err(JsValue::from_str(
+            "WASM thread pool is not initialized. Call initWasmThreadPool(...) after init().",
+        ));
+    }
+
+    let (sender, receiver) = oneshot::channel();
+    rayon::spawn(move || {
+        let _ = sender.send(generate_map_cells_inner(
+            requested_cell_count,
+            rng_seed,
+            max_samples,
+            slack,
+            spikiness,
+            elevation_range,
+        ));
+    });
+
+    let result = receiver
+        .await
+        .map_err(|_| JsValue::from_str("Map generation task was cancelled"))?;
+    result.map_err(|err| JsValue::from_str(&err))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) async fn generate_map_cells_async(
+    requested_cell_count: usize,
+    rng_seed: u64,
+    max_samples: u32,
+    slack: f32,
+    spikiness: f64,
+    elevation_range: (f64, f64),
+) -> Result<Vec<MapCell>, JsValue> {
+    generate_map_cells(
+        requested_cell_count,
+        rng_seed,
+        max_samples,
+        slack,
+        spikiness,
+        elevation_range,
+    )
 }
 
 fn generate_map_cells_inner(

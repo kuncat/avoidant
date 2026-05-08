@@ -7,7 +7,7 @@ use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use crate::mapgen;
 use crate::mutation::{Mutation, MutationOrigin};
 use crate::net::TicketOpts;
-use crate::{GameOptions, GameState, MapCells, NetworkNode, UiState, utils};
+use crate::{GameOptions, GameState, MapCell, MapCells, NetworkNode, UiState, utils};
 use networking::GameTicket;
 
 #[wasm_bindgen]
@@ -69,6 +69,17 @@ impl GameState {
         self.network_node.is_some()
     }
 
+    fn apply_generated_cells(&mut self, cells: Vec<MapCell>) -> Result<JsValue, JsValue> {
+        let output_cells = Array::new();
+        for cell in cells {
+            let map_cell = serde_wasm_bindgen::to_value(&cell)?;
+            output_cells.push(&map_cell);
+        }
+
+        self.cells.borrow_mut().set(output_cells.clone());
+        Ok(output_cells.into())
+    }
+
     pub fn generate_map(&mut self) -> Result<JsValue, JsValue> {
         if self.num_cells > usize::MAX as u64 {
             return Err(JsValue::from_str(
@@ -77,7 +88,6 @@ impl GameState {
         }
 
         let requested_cell_count = self.num_cells as usize;
-        let output_cells = Array::new();
         let cells = mapgen::generate_map_cells(
             requested_cell_count,
             self.rng_seed,
@@ -87,13 +97,29 @@ impl GameState {
             (self.elevation_min, self.elevation_max),
         )?;
 
-        for cell in cells {
-            let map_cell = serde_wasm_bindgen::to_value(&cell)?;
-            output_cells.push(&map_cell);
+        self.apply_generated_cells(cells)
+    }
+
+    #[wasm_bindgen(js_name = "generateMapAsync")]
+    pub async fn generate_map_async(&mut self) -> Result<JsValue, JsValue> {
+        if self.num_cells > usize::MAX as u64 {
+            return Err(JsValue::from_str(
+                "numCells is too large for this target architecture",
+            ));
         }
 
-        self.cells.borrow_mut().set(output_cells.clone());
-        Ok(output_cells.into())
+        let requested_cell_count = self.num_cells as usize;
+        let cells = mapgen::generate_map_cells_async(
+            requested_cell_count,
+            self.rng_seed,
+            self.max_samples,
+            self.slack,
+            self.spikiness,
+            (self.elevation_min, self.elevation_max),
+        )
+        .await?;
+
+        self.apply_generated_cells(cells)
     }
 
     #[wasm_bindgen(js_name = "exploreCell")]
@@ -154,7 +180,7 @@ impl GameState {
         let options_value = JSON::parse(&options_json)?;
         let options: GameOptions = serde_wasm_bindgen::from_value(options_value)?;
         let mut state = GameState::new(options)?;
-        state.generate_map()?;
+        state.generate_map_async().await?;
 
         let node = NetworkNode::spawn().await.map_err(Into::<JsValue>::into)?;
         let channel = node

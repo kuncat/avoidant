@@ -30,7 +30,7 @@
     }
   });
 
-  function startGame() {
+  async function startGame() {
     try {
       status = "Generating map...";
       gameState = new GameState({
@@ -40,7 +40,7 @@
         rngSeed: $state.snapshot(rngSeedInput),
         spikiness: 0.8,
       });
-      gameState.generate_map();
+      await gameState.generateMapAsync();
       inviteTicket = "";
     } catch (error) {
       console.error("Failed to start game", error);
@@ -78,9 +78,9 @@
     {#if gameConfig === "host"}
       <form
         class="w-full max-w-lg"
-        onsubmit={(event) => {
+        onsubmit={async (event) => {
           event.preventDefault();
-          startGame();
+          await startGame();
         }}
       >
         <div class="-mx-3 mb-2 flex flex-wrap">
@@ -145,9 +145,9 @@
     {:else if gameConfig === "join"}
       <form
         class="w-full max-w-lg"
-        onsubmit={(event) => {
+        onsubmit={async (event) => {
           event.preventDefault();
-          void joinGame();
+          await joinGame();
         }}
       >
         <div class="-mx-3 mb-2 flex flex-wrap">
