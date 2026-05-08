@@ -3,6 +3,7 @@ use rand::RngCore;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
+use rayon::prelude::*;
 use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::JsValue;
 
@@ -16,25 +17,47 @@ pub(crate) fn generate_map_cells(
     spikiness: f64,
     elevation_range: (f64, f64),
 ) -> Result<Vec<MapCell>, JsValue> {
+    generate_map_cells_inner(
+        requested_cell_count,
+        rng_seed,
+        max_samples,
+        slack,
+        spikiness,
+        elevation_range,
+    )
+    .map_err(|err| JsValue::from_str(&err))
+}
+
+fn generate_map_cells_inner(
+    requested_cell_count: usize,
+    rng_seed: u64,
+    max_samples: u32,
+    slack: f32,
+    spikiness: f64,
+    elevation_range: (f64, f64),
+) -> Result<Vec<MapCell>, String> {
     let points = sample_points(requested_cell_count, rng_seed, max_samples, slack)?;
 
     let Some(diagram) = VoronoiDiagram::<Point>::from_tuple(&(0.0, 0.0), &(100.0, 100.0), &points)
     else {
-        return Err(JsValue::from_str(&format!(
+        return Err(format!(
             "Voronoi generation failed: size/seed combo isn't viable (numCells={}, rngSeed={})",
             requested_cell_count, rng_seed
-        )));
+        ));
     };
 
-    let mut output_cells = Vec::with_capacity(requested_cell_count);
-    for polygon in diagram.cells() {
-        let mut vertices = Vec::new();
-        for point in polygon.points() {
-            let height = vertex_height(point.x, point.y, rng_seed, spikiness, elevation_range);
-            vertices.push([point.x, point.y, height]);
-        }
-        output_cells.push(MapCell::from_vertices(vertices, false, false));
-    }
+    let output_cells: Vec<MapCell> = diagram
+        .cells()
+        .par_iter()
+        .map(|polygon| {
+            let mut vertices = Vec::new();
+            for point in polygon.points() {
+                let height = vertex_height(point.x, point.y, rng_seed, spikiness, elevation_range);
+                vertices.push([point.x, point.y, height]);
+            }
+            MapCell::from_vertices(vertices, false, false)
+        })
+        .collect();
 
     Ok(output_cells)
 }
@@ -107,7 +130,7 @@ fn sample_points(
     rng_seed: u64,
     max_samples: u32,
     slack: f32,
-) -> Result<Vec<(f64, f64)>, JsValue> {
+) -> Result<Vec<(f64, f64)>, String> {
     if requested_cell_count == 0 {
         return Ok(Vec::new());
     }
@@ -142,10 +165,10 @@ fn sample_points(
         min_radius *= relax_factor;
     }
 
-    Err(JsValue::from_str(&format!(
+    Err(format!(
         "Poisson sampling failed: size/seed combo isn't viable (numCells={}, rngSeed={}, tries={}, slack={})",
         requested_cell_count, rng_seed, max_samples, slack
-    )))
+    ))
 }
 
 #[cfg(test)]

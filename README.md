@@ -16,6 +16,16 @@ wasm-pack
 cargo install wasm-pack
 ```
 
+Nightly Rust toolchain (required for WebAssembly threads via wasm-bindgen-rayon)
+
+```sh
+rustup toolchain install nightly --component rust-src --target wasm32-unknown-unknown
+```
+
+On static hosting, ensure cross-origin isolation headers (for browser WebAssembly threads):
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`
+
 ### Running
 
 Install dependencies with `npm install` then start a development server:

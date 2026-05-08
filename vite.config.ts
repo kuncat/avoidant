@@ -5,6 +5,11 @@ import { playwright } from "@vitest/browser-playwright";
 import { sveltekit } from "@sveltejs/kit/vite";
 import wasm from "vite-plugin-wasm";
 
+const wasmThreadHeaders = {
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
@@ -41,9 +46,13 @@ export default defineConfig({
     ],
   },
   server: {
+    headers: wasmThreadHeaders,
     fs: {
       allow: ["wasm-pkg"],
     },
+  },
+  preview: {
+    headers: wasmThreadHeaders,
   },
   worker: {
     plugins: () => [wasm()],

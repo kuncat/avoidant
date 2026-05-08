@@ -24,8 +24,6 @@ fn start() {
         .without_time()
         .with_ansi(false)
         .init();
-
-    tracing::info!("(testing logging) Logging setup");
 }
 
 #[wasm_bindgen]

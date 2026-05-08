@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import init, { GameState } from "wasm-pkg";
+  import init, { GameState, initWasmThreadPool } from "wasm-pkg";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
   import { MOUSE } from "three";
   import Board from "$lib/components/board.svelte";
 
-  let isLoading = $state(true);
+  let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
   let numCellsInput = $state(160);
   let rngSeedInput = $state(999);
@@ -16,12 +16,23 @@
   let inviteTicket = $state("");
 
   onMount(async () => {
-    await init();
-    isLoading = false;
+    try {
+      status = "Loading...";
+      await init();
+
+      status = "Starting worker threads...";
+      const threadCount = Math.max(2, navigator.hardwareConcurrency ?? 4);
+      await initWasmThreadPool(threadCount);
+      status = undefined;
+    } catch (error) {
+      status = "Failed to initialize wasm thread pool.";
+      console.error("Failed to initialize wasm", error);
+    }
   });
 
   function startGame() {
     try {
+      status = "Generating map...";
       gameState = new GameState({
         elevationMax: 6.0,
         elevationMin: 0.0,
@@ -35,11 +46,13 @@
       console.error("Failed to start game", error);
     } finally {
       gameConfig = undefined;
+      status = undefined;
     }
   }
 
   async function joinGame() {
     try {
+      status = "Joining game...";
       gameState = await GameState.joinFromTicket(ticketInput, playerNameInput);
       inviteTicket = "";
     } catch (error) {
@@ -47,6 +60,7 @@
     } finally {
       gameConfig = undefined;
       ticketInput = "";
+      status = undefined;
     }
   }
 </script>
@@ -57,9 +71,10 @@
 >
   <h1>Avoidant</h1>
 
-  {#if isLoading}
-    <p>Loading...</p>
-  {:else if !gameState}
+  {#if status}
+    <p>{status}</p>
+  {/if}
+  {#if !gameState}
     {#if gameConfig === "host"}
       <form
         class="w-full max-w-lg"
