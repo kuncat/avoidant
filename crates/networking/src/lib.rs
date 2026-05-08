@@ -133,7 +133,7 @@ impl Node {
 
             async move {
                 loop {
-                    let nickname = nickname.lock().expect("poisened").clone();
+                    let nickname = nickname.lock().expect("poisoned").clone();
                     let message = Message::Presence { nickname };
                     debug!("send presence {message:?}");
                     let signed_message = SignedMessage::sign_and_encode(&secret_key, message)
@@ -218,7 +218,7 @@ pub struct GameInviter {
 
 impl GameInviter {
     pub async fn send(&self, text: String) -> Result<()> {
-        let nickname = self.nickname.lock().expect("poisened").clone();
+        let nickname = self.nickname.lock().expect("poisoned").clone();
         let message = Message::Message { text, nickname };
         let signed_message = SignedMessage::sign_and_encode(&self.secret_key, message)?;
         self.sender
@@ -230,7 +230,7 @@ impl GameInviter {
     }
 
     pub fn set_nickname(&self, name: String) {
-        *self.nickname.lock().expect("poisened") = name;
+        *self.nickname.lock().expect("poisoned") = name;
         self.trigger_presence.notify_waiters();
     }
 }
