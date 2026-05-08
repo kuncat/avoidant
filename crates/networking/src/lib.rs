@@ -1,11 +1,12 @@
 use std::{
     collections::BTreeSet,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use anyhow::{Context, Result};
 pub use iroh::EndpointId;
-use iroh::{PublicKey, SecretKey, Signature, protocol::Router};
+use iroh::{PublicKey, RelayMap, RelayUrl, SecretKey, Signature, protocol::Router};
 pub use iroh_gossip::proto::TopicId;
 use iroh_gossip::{
     api::{Event as GossipEvent, GossipSender},
@@ -76,7 +77,10 @@ impl Node {
     /// Spawns a gossip node.
     pub async fn spawn(secret_key: Option<SecretKey>) -> Result<Self> {
         let secret_key = secret_key.unwrap_or_else(SecretKey::generate);
-        let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::N0)
+        let relay_url_1 = RelayUrl::from_str("https://use1-1.relay.aakside.avoidant.iroh.link/")?;
+        let relay_map: RelayMap = vec![(relay_url_1.clone())].into_iter().collect();
+        let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+            .relay_mode(iroh::endpoint::RelayMode::Custom(relay_map))
             .secret_key(secret_key.clone())
             .alpns(vec![GOSSIP_ALPN.to_vec()])
             .bind()
