@@ -1,12 +1,19 @@
 use std::{
     collections::BTreeSet,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use anyhow::{Context, Result};
 pub use iroh::EndpointId;
-use iroh::{PublicKey, RelayMap, RelayUrl, SecretKey, Signature, protocol::Router};
+use iroh::address_lookup::memory::MemoryLookup;
+use iroh::{
+    EndpointAddr, PublicKey, RelayMap, RelayUrl, SecretKey, Signature, TransportAddr,
+    protocol::Router,
+};
 pub use iroh_gossip::proto::TopicId;
 use iroh_gossip::{
     api::{Event as GossipEvent, GossipSender},
@@ -71,6 +78,8 @@ pub struct Node {
     secret_key: SecretKey,
     router: Router,
     gossip: Gossip,
+    relay_url: RelayUrl,
+    memory_lookup: MemoryLookup,
 }
 
 impl Node {
@@ -79,16 +88,42 @@ impl Node {
         let secret_key = secret_key.unwrap_or_else(SecretKey::generate);
         let relay_url_1 = RelayUrl::from_str("https://use1-1.relay.aakside.avoidant.iroh.link/")?;
         let relay_map: RelayMap = vec![(relay_url_1.clone())].into_iter().collect();
-        let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+        let memory_lookup = MemoryLookup::with_provenance("game_ticket_bootstrap");
+        let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::N0)
+            .address_lookup(memory_lookup.clone())
             .relay_mode(iroh::endpoint::RelayMode::Custom(relay_map))
             .secret_key(secret_key.clone())
             .alpns(vec![GOSSIP_ALPN.to_vec()])
             .bind()
             .await?;
 
+        // Wait briefly for relay connectivity so endpoint-id discovery has a chance to stabilize.
+        let online_timeout = Duration::from_secs(5);
+        let reached_online = n0_future::future::race(
+            async {
+                endpoint.online().await;
+                true
+            },
+            async {
+                n0_future::time::sleep(online_timeout).await;
+                false
+            },
+        )
+        .await;
+
+        if reached_online {
+            info!("endpoint reached relay-online state");
+        } else {
+            warn!(
+                "endpoint did not reach relay-online state within {:?}",
+                online_timeout
+            );
+        }
+
         let endpoint_id = endpoint.id();
         info!("endpoint bound");
         info!("endpoint id: {endpoint_id:#?}");
+        info!(addr = ?endpoint.addr(), "endpoint addr snapshot");
 
         let gossip = Gossip::builder().spawn(endpoint.clone());
         info!("gossip spawned");
@@ -100,6 +135,8 @@ impl Node {
             gossip,
             router,
             secret_key,
+            relay_url: relay_url_1,
+            memory_lookup,
         })
     }
 
@@ -118,17 +155,58 @@ impl Node {
         nickname: String,
     ) -> Result<(GameInviter, BoxStream<Result<Event>>)> {
         let topic_id = ticket.topic_id;
-        let bootstrap = ticket.bootstrap.iter().cloned().collect();
+        let bootstrap: Vec<EndpointId> = ticket.bootstrap.iter().cloned().collect();
+
+        // Seed bootstrap endpoint IDs with a relay address from the ticketing context.
+        // This avoids relying solely on external discovery propagation before first dial.
+        for endpoint_id in bootstrap.iter().copied() {
+            if endpoint_id == self.endpoint_id() {
+                continue;
+            }
+
+            let endpoint_addr = EndpointAddr::from_parts(
+                endpoint_id,
+                [TransportAddr::Relay(self.relay_url.clone())],
+            );
+            self.memory_lookup.add_endpoint_info(endpoint_addr);
+        }
+
+        let bootstrap_for_retry = bootstrap.clone();
+
         info!(?bootstrap, "joining {topic_id}");
         let gossip_topic = self.gossip.subscribe(topic_id, bootstrap).await?;
         let (sender, receiver) = gossip_topic.split();
 
         let nickname = Arc::new(Mutex::new(nickname));
         let trigger_presence = Arc::new(Notify::new());
+        let has_joined = Arc::new(AtomicBool::new(false));
 
         // We spawn a task that occasionally sens a Presence message with our nickname.
         // This allows to track which peers are online currently.
         let sender = Arc::new(TokioMutex::new(sender));
+        let bootstrap_retry_task = AbortOnDropHandle::new(task::spawn({
+            let sender = sender.clone();
+            let has_joined = has_joined.clone();
+            let bootstrap = bootstrap_for_retry;
+
+            async move {
+                if bootstrap.is_empty() {
+                    return;
+                }
+
+                loop {
+                    if has_joined.load(Ordering::Relaxed) {
+                        return;
+                    }
+
+                    if let Err(err) = sender.lock().await.join_peers(bootstrap.clone()).await {
+                        tracing::warn!("bootstrap peer retry failed: {err}");
+                    }
+
+                    n0_future::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }));
         let presence_task = AbortOnDropHandle::new(task::spawn({
             let secret_key = self.secret_key.clone();
             let sender = sender.clone();
@@ -143,8 +221,7 @@ impl Node {
                     let signed_message = SignedMessage::sign_and_encode(&secret_key, message)
                         .expect("failed to encode message");
                     if let Err(err) = sender.lock().await.broadcast(signed_message.into()).await {
-                        tracing::warn!("presence task failed to broadcast: {err}");
-                        break;
+                        tracing::warn!("presence task failed to broadcast (will retry): {err}");
                     }
                     n0_future::future::race(
                         n0_future::time::sleep(PRESENCE_INTERVAL),
@@ -161,8 +238,10 @@ impl Node {
         // once the swarm is joined initially.
         let receiver = n0_future::stream::try_unfold(receiver, {
             let trigger_presence = trigger_presence.clone();
+            let has_joined = has_joined.clone();
             move |mut receiver| {
                 let trigger_presence = trigger_presence.clone();
+                let has_joined = has_joined.clone();
                 async move {
                     loop {
                         // Store if we were joined before the next event comes in.
@@ -182,6 +261,9 @@ impl Node {
                                 continue;
                             }
                         };
+                        if receiver.is_joined() {
+                            has_joined.store(true, Ordering::Relaxed);
+                        }
                         // If we just joined, trigger sending our presence message.
                         if !was_joined && receiver.is_joined() {
                             trigger_presence.notify_waiters()
@@ -199,6 +281,7 @@ impl Node {
             sender,
             trigger_presence,
             _presence_task: Arc::new(presence_task),
+            _bootstrap_retry_task: Arc::new(bootstrap_retry_task),
         };
         Ok((sender, Box::pin(receiver)))
     }
@@ -218,6 +301,7 @@ pub struct GameInviter {
     sender: Arc<TokioMutex<GossipSender>>,
     trigger_presence: Arc<Notify>,
     _presence_task: Arc<AbortOnDropHandle<()>>,
+    _bootstrap_retry_task: Arc<AbortOnDropHandle<()>>,
 }
 
 impl GameInviter {

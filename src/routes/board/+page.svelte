@@ -15,22 +15,8 @@
   let ticketInput = $state("");
   let inviteTicket = $state("");
   let nowMs = $state(Date.now());
-
-  // const EMPTY_NETWORK_SNAPSHOT: WasmNetworkSnapshot = {
-  //   hasNode: false,
-  //   listenerStarted: false,
-  //   endpointId: undefined,
-  //   topicId: undefined,
-  //   peers: [],
-  //   lastInboundMutationMs: undefined,
-  //   lastOutboundMutationMs: undefined,
-  //   sampledAtMs: Date.now(),
-  // };
-
-  // let networkSnapshotStore = $derived(gameState?.networkSnapshot);
-  // let networkSnapshot = $derived($networkSnapshotStore ?? EMPTY_NETWORK_SNAPSHOT); // TODO: Remove EMPTY_NETWORK_SNAPSHOT
+  let nodeReadyAtMs = $state<number | undefined>(undefined);
   let networkSnapshot = $derived(gameState?.networkSnapshot);
-
   let hasSeenConnectedPeers = $state(false);
 
   let connectedPeers = $derived(
@@ -100,21 +86,58 @@
     return `${Math.round(elapsedMs / 60_000)}m ago`;
   }
 
+  function formatDuration(elapsedMs: number): string {
+    if (elapsedMs < 1000) {
+      return `${Math.max(0, Math.round(elapsedMs))}ms`;
+    }
+
+    if (elapsedMs < 60_000) {
+      return `${(elapsedMs / 1000).toFixed(1)}s`;
+    }
+
+    return `${(elapsedMs / 60_000).toFixed(1)}m`;
+  }
+
   let timeSinceLastInboundMutation = $derived(
     formatMutationAge($networkSnapshot?.lastInboundMutationMs, nowMs),
   );
   let timeSinceLastOutboundMutation = $derived(
     formatMutationAge($networkSnapshot?.lastOutboundMutationMs, nowMs),
   );
+  let timeSinceNodeReady = $derived(
+    nodeReadyAtMs === undefined ? "n/a" : formatDuration(nowMs - nodeReadyAtMs),
+  );
+  let snapshotAge = $derived(
+    $networkSnapshot === undefined ? "n/a" : formatDuration(nowMs - $networkSnapshot.sampledAtMs),
+  );
+  let prolongedZeroPeersWarning = $derived(
+    $networkSnapshot?.hasNode &&
+      $networkSnapshot?.listenerStarted &&
+      connectedPeers.length === 0 &&
+      nodeReadyAtMs !== undefined &&
+      nowMs - nodeReadyAtMs > 15_000,
+  );
+  let networkSnapshotStaleWarning = $derived(
+    $networkSnapshot !== undefined && nowMs - $networkSnapshot.sampledAtMs > 10_000,
+  );
 
   $effect(() => {
     if (!gameState) {
       hasSeenConnectedPeers = false;
+      nodeReadyAtMs = undefined;
       return;
     }
 
     if (connectedPeers.length > 0) {
       hasSeenConnectedPeers = true;
+    }
+
+    if ($networkSnapshot?.hasNode && nodeReadyAtMs === undefined) {
+      nodeReadyAtMs = Date.now();
+    }
+
+    if (!$networkSnapshot?.hasNode) {
+      nodeReadyAtMs = undefined;
     }
   });
 
@@ -369,6 +392,8 @@
             : "n/a"}
         </p>
         <p class="mt-1">Connected Peers: {connectedPeers.length}</p>
+        <p class="mt-1">Time Since Node Ready: {timeSinceNodeReady}</p>
+        <p class="mt-1">Snapshot Age: {snapshotAge}</p>
         <p class="mt-1">
           Last Outbound Mutation: {timeSinceLastOutboundMutation}
         </p>
@@ -382,6 +407,28 @@
           >
             Peer connectivity dropped to zero after being connected. Relay/session might be
             unstable.
+          </p>
+        {/if}
+
+        {#if prolongedZeroPeersWarning}
+          <div
+            class="mt-2 rounded border border-rose-300 bg-rose-100 px-2 py-2 text-[11px] text-rose-900"
+          >
+            <p class="font-semibold">Connectivity Stall Detected</p>
+            <p class="mt-1">
+              No peers connected for {timeSinceNodeReady} after node startup.
+            </p>
+            <p class="mt-1">
+              Bootstrap retries are running, but relay discovery/dialing may still be failing.
+            </p>
+          </div>
+        {/if}
+
+        {#if networkSnapshotStaleWarning}
+          <p
+            class="mt-2 rounded border border-orange-300 bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-900"
+          >
+            No new network events for {snapshotAge}. Connection state may be stale.
           </p>
         {/if}
 

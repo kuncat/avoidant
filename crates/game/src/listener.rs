@@ -19,25 +19,32 @@ use crate::{NetworkPeerStatus, NetworkSnapshot, PeerPresenceEntry};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum NetworkEvent {
+    #[serde(rename_all = "camelCase")]
     Joined {
         neighbors: Vec<String>,
     },
+    #[serde(rename_all = "camelCase")]
     MessageReceived {
         from: String,
         text: String,
         nickname: String,
         #[allow(dead_code)]
-        sent_timestamp: u64,
+        #[serde(default)]
+        sent_timestamp: Option<u64>,
     },
+    #[serde(rename_all = "camelCase")]
     Presence {
         from: String,
         nickname: String,
         #[allow(dead_code)]
-        sent_timestamp: u64,
+        #[serde(default)]
+        sent_timestamp: Option<u64>,
     },
+    #[serde(rename_all = "camelCase")]
     NeighborUp {
         endpoint_id: String,
     },
+    #[serde(rename_all = "camelCase")]
     NeighborDown {
         endpoint_id: String,
     },
