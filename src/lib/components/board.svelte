@@ -21,6 +21,7 @@
 
   let { gameState = $bindable() }: Props = $props();
   let cells = $derived(gameState?.cells);
+  let cellMetadata = $derived(gameState?.cellMetadata);
   let pulses = $derived(gameState?.uiState?.pulses);
   let nowMs = $state(0);
 
@@ -35,8 +36,8 @@
     return () => cancelAnimationFrame(rafId);
   });
 
-  function triangulateCell(vertices: MapCell["vertices"]): number[] {
-    if (vertices.length < 3) return [];
+  function triangulateCell(vertices: MapCell["vertices"]): Float32Array {
+    if (vertices.length < 3) return new Float32Array(0);
 
     const [ax, ay, ah] = vertices[0];
     const trianglePositions: number[] = [];
@@ -47,15 +48,15 @@
       trianglePositions.push(ax, ah, ay, bx, bh, by, cx, ch, cy);
     }
 
-    return trianglePositions;
+    return new Float32Array(trianglePositions);
   }
 
   function cellEdgeRibbon(
     vertices: MapCell["vertices"],
     halfWidth: number,
     lift: number,
-  ): number[] {
-    if (vertices.length < 2) return [];
+  ): Float32Array {
+    if (vertices.length < 2) return new Float32Array(0);
 
     const edgeTriangles: number[] = [];
 
@@ -79,8 +80,16 @@
       edgeTriangles.push(...aLeft, ...aRight, ...bLeft, ...bLeft, ...aRight, ...bRight);
     }
 
-    return edgeTriangles;
+    return new Float32Array(edgeTriangles);
   }
+
+  let cellGeometries = $derived.by(() =>
+    Array.from($cells ?? []).map((cell) => ({
+      trianglePositions: triangulateCell(cell.vertices),
+      edgeRibbonBase: cellEdgeRibbon(cell.vertices, 0.24, 0.13),
+      edgeRibbonHighlight: cellEdgeRibbon(cell.vertices, 0.13, 0.16),
+    })),
+  );
 
   const pulsesArray = $derived(
     Array.from($pulses ?? [])
@@ -104,20 +113,15 @@
 </script>
 
 <T.Group>
-  {#each $cells as cell, cellIndex (cellIndex)}
-    {@const trianglePositions = triangulateCell(cell.vertices)}
-    {@const edgeRibbonBase = cellEdgeRibbon(cell.vertices, 0.24, 0.13)}
-    {@const edgeRibbonHighlight = cellEdgeRibbon(cell.vertices, 0.13, 0.16)}
-    {#if trianglePositions.length > 0}
+  {#each cellGeometries as geometry, cellIndex (cellIndex)}
+    {@const metadata = $cellMetadata[cellIndex]}
+    {#if geometry.trianglePositions.length > 0 && !metadata?.isVoid}
       <T.Mesh
         onclick={(event: { point: Vector3 }) =>
           gameState.queueExplorePulse(cellIndex, event.point.x, event.point.y, event.point.z)}
       >
         <T.BufferGeometry attach="geometry">
-          <T.BufferAttribute
-            attach="attributes.position"
-            args={[new Float32Array(trianglePositions), 3]}
-          />
+          <T.BufferAttribute attach="attributes.position" args={[geometry.trianglePositions, 3]} />
         </T.BufferGeometry>
         <T.ShaderMaterial
           side={DoubleSide}
@@ -134,7 +138,7 @@
             pulseOriginCells: { value: new Array(MAX_PULSES).fill(-1) },
             pulseIsRemote: { value: new Array(MAX_PULSES).fill(0) },
           }}
-          uniforms.isExplored.value={cell.isExplored ? 1.0 : 0.0}
+          uniforms.isExplored.value={metadata?.isExplored ? 1.0 : 0.0}
           uniforms.cellIndex.value={cellIndex}
           uniforms.pulseCount.value={Math.min(($pulses ?? []).length, MAX_PULSES)}
           uniforms.pulseTimers.value={pulseTimersUniform}
@@ -144,24 +148,21 @@
         />
       </T.Mesh>
 
-      {#if edgeRibbonBase.length > 0}
+      {#if geometry.edgeRibbonBase.length > 0}
         <T.Mesh>
           <T.BufferGeometry attach="geometry">
-            <T.BufferAttribute
-              attach="attributes.position"
-              args={[new Float32Array(edgeRibbonBase), 3]}
-            />
+            <T.BufferAttribute attach="attributes.position" args={[geometry.edgeRibbonBase, 3]} />
           </T.BufferGeometry>
           <T.MeshBasicMaterial attach="material" color="#8fbdd0" side={DoubleSide} />
         </T.Mesh>
       {/if}
 
-      {#if edgeRibbonHighlight.length > 0}
+      {#if geometry.edgeRibbonHighlight.length > 0}
         <T.Mesh>
           <T.BufferGeometry attach="geometry">
             <T.BufferAttribute
               attach="attributes.position"
-              args={[new Float32Array(edgeRibbonHighlight), 3]}
+              args={[geometry.edgeRibbonHighlight, 3]}
             />
           </T.BufferGeometry>
           <T.MeshBasicMaterial attach="material" color="#e7fbff" side={DoubleSide} />

@@ -7,7 +7,10 @@ use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use crate::mapgen;
 use crate::mutation::{Mutation, MutationOrigin};
 use crate::net::TicketOpts;
-use crate::{GameOptions, GameState, MapCell, MapCells, NetworkNode, UiState, utils};
+use crate::{
+    CellMetadata, CellMetadataEntry, GameOptions, GameState, MapCell, MapCells, NetworkNode,
+    UiState, utils,
+};
 use networking::GameTicket;
 
 #[wasm_bindgen]
@@ -29,6 +32,7 @@ impl GameState {
 
         Ok(GameState {
             cells: Rc::new(RefCell::new(Readable::new(Array::new()))),
+            cell_metadata: Rc::new(RefCell::new(Readable::new(Array::new()))),
             ui_state: UiState::new(),
             num_cells: options.num_cells,
             rng_seed: options.rng_seed,
@@ -47,6 +51,11 @@ impl GameState {
     #[wasm_bindgen(getter, js_name = cells)]
     pub fn cells_store(&self) -> MapCells {
         self.cells.borrow().get_store().into()
+    }
+
+    #[wasm_bindgen(getter, js_name = "cellMetadata")]
+    pub fn cell_metadata_store(&self) -> CellMetadata {
+        self.cell_metadata.borrow().get_store().into()
     }
 
     #[wasm_bindgen(getter, js_name = "uiState")]
@@ -71,33 +80,19 @@ impl GameState {
 
     fn apply_generated_cells(&mut self, cells: Vec<MapCell>) -> Result<JsValue, JsValue> {
         let output_cells = Array::new();
+        let output_metadata = Array::new();
         for cell in cells {
             let map_cell = serde_wasm_bindgen::to_value(&cell)?;
             output_cells.push(&map_cell);
+
+            let metadata = CellMetadataEntry::new(false, false);
+            let metadata_value = serde_wasm_bindgen::to_value(&metadata)?;
+            output_metadata.push(&metadata_value);
         }
 
         self.cells.borrow_mut().set(output_cells.clone());
+        self.cell_metadata.borrow_mut().set(output_metadata);
         Ok(output_cells.into())
-    }
-
-    pub fn generate_map(&mut self) -> Result<JsValue, JsValue> {
-        if self.num_cells > usize::MAX as u64 {
-            return Err(JsValue::from_str(
-                "numCells is too large for this target architecture",
-            ));
-        }
-
-        let requested_cell_count = self.num_cells as usize;
-        let cells = mapgen::generate_map_cells(
-            requested_cell_count,
-            self.rng_seed,
-            self.max_samples,
-            self.slack,
-            self.spikiness,
-            (self.elevation_min, self.elevation_max),
-        )?;
-
-        self.apply_generated_cells(cells)
     }
 
     #[wasm_bindgen(js_name = "generateMapAsync")]

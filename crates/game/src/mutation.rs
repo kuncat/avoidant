@@ -6,7 +6,7 @@ use svelte_store::Readable;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::{MapCell, PULSE_DURATION_MS, UiState};
+use crate::{CellMetadataEntry, PULSE_DURATION_MS, UiState};
 
 const MUTATION_DELIMITER: char = '|';
 
@@ -106,9 +106,9 @@ impl Mutation {
         Some(mutation)
     }
 
-    fn apply(self, cells: &Rc<RefCell<Readable<Array>>>) -> Result<(), JsValue> {
+    fn apply(self, cell_metadata: &Rc<RefCell<Readable<Array>>>) -> Result<(), JsValue> {
         match self {
-            Self::ExploreCell { index, .. } => mark_cell_explored(cells, index),
+            Self::ExploreCell { index, .. } => mark_cell_explored(cell_metadata, index),
         }
     }
 }
@@ -120,7 +120,7 @@ pub(crate) enum MutationOrigin {
 }
 
 pub(crate) fn apply_mutation_with_effects(
-    cells: &Rc<RefCell<Readable<Array>>>,
+    cell_metadata: &Rc<RefCell<Readable<Array>>>,
     ui_state: &UiState,
     mutation: Mutation,
     origin: MutationOrigin,
@@ -137,10 +137,10 @@ pub(crate) fn apply_mutation_with_effects(
         .add_pulse_internal(index, x, y, z, PULSE_DURATION_MS, is_remote)
         .map(|_| ())?;
 
-    let delayed_cells = cells.clone();
+    let delayed_cell_metadata = cell_metadata.clone();
     spawn_local(async move {
         n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
-        if let Err(err) = mutation.apply(&delayed_cells) {
+        if let Err(err) = mutation.apply(&delayed_cell_metadata) {
             tracing::warn!("failed to apply delayed mutation: {:?}", err);
         }
     });
@@ -148,22 +148,26 @@ pub(crate) fn apply_mutation_with_effects(
     Ok(())
 }
 
-fn mark_cell_explored(cells: &Rc<RefCell<Readable<Array>>>, index: usize) -> Result<(), JsValue> {
-    cells.borrow_mut().set_with(|cells_array| {
-        if index >= cells_array.length() as usize {
+fn mark_cell_explored(
+    cell_metadata: &Rc<RefCell<Readable<Array>>>,
+    index: usize,
+) -> Result<(), JsValue> {
+    cell_metadata.borrow_mut().set_with(|metadata_array| {
+        if index >= metadata_array.length() as usize {
             return Ok::<(), JsValue>(());
         }
 
-        let cell = cells_array.get(index as u32);
-        let mut typed_cell: MapCell = serde_wasm_bindgen::from_value(cell).map_err(|err| {
-            JsValue::from_str(&format!("Failed to decode map cell from store: {err}"))
-        })?;
-        typed_cell.mark_explored();
+        let metadata = metadata_array.get(index as u32);
+        let mut typed_metadata: CellMetadataEntry = serde_wasm_bindgen::from_value(metadata)
+            .map_err(|err| {
+                JsValue::from_str(&format!("Failed to decode cell metadata from store: {err}"))
+            })?;
+        typed_metadata.mark_explored();
 
-        let updated_cell = serde_wasm_bindgen::to_value(&typed_cell).map_err(|err| {
-            JsValue::from_str(&format!("Failed to encode updated map cell: {err}"))
+        let updated_metadata = serde_wasm_bindgen::to_value(&typed_metadata).map_err(|err| {
+            JsValue::from_str(&format!("Failed to encode updated cell metadata: {err}"))
         })?;
-        cells_array.set(index as u32, updated_cell);
+        metadata_array.set(index as u32, updated_metadata);
 
         Ok(())
     })

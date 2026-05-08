@@ -1,5 +1,4 @@
 use bluenoise::BlueNoise;
-#[cfg(target_arch = "wasm32")]
 use futures_channel::oneshot;
 use rand::RngCore;
 use rand::SeedableRng;
@@ -11,26 +10,6 @@ use wasm_bindgen::JsValue;
 
 use crate::MapCell;
 
-pub(crate) fn generate_map_cells(
-    requested_cell_count: usize,
-    rng_seed: u64,
-    max_samples: u32,
-    slack: f32,
-    spikiness: f64,
-    elevation_range: (f64, f64),
-) -> Result<Vec<MapCell>, JsValue> {
-    generate_map_cells_inner(
-        requested_cell_count,
-        rng_seed,
-        max_samples,
-        slack,
-        spikiness,
-        elevation_range,
-    )
-    .map_err(|err| JsValue::from_str(&err))
-}
-
-#[cfg(target_arch = "wasm32")]
 pub(crate) async fn generate_map_cells_async(
     requested_cell_count: usize,
     rng_seed: u64,
@@ -90,7 +69,7 @@ fn generate_map_cells_inner(
                 let height = vertex_height(point.x, point.y, rng_seed, spikiness, elevation_range);
                 vertices.push([point.x, point.y, height]);
             }
-            MapCell::from_vertices(vertices, false, false)
+            MapCell::from_vertices(vertices)
         })
         .collect();
 

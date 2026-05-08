@@ -15,13 +15,13 @@ impl GameState {
             return;
         };
 
-        let cells = self.cells.clone();
+        let cell_metadata = self.cell_metadata.clone();
         let ui_state = self.ui_state.clone();
         let local_endpoint_id = self.network_node.as_ref().map(|node| node.endpoint_id());
         let receiver = channel.receiver();
         self.network_listener_started = true;
 
-        listener::spawn_network_listener(receiver, cells, ui_state, local_endpoint_id);
+        listener::spawn_network_listener(receiver, cell_metadata, ui_state, local_endpoint_id);
     }
 
     pub(crate) fn dispatch_explore_mutation(
@@ -29,7 +29,7 @@ impl GameState {
         mutation: Mutation,
         origin: MutationOrigin,
     ) -> Result<(), JsValue> {
-        apply_mutation_with_effects(&self.cells, &self.ui_state, mutation, origin)?;
+        apply_mutation_with_effects(&self.cell_metadata, &self.ui_state, mutation, origin)?;
 
         if matches!(origin, MutationOrigin::Local) {
             self.broadcast_state_mutation(mutation);

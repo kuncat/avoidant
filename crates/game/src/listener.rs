@@ -18,7 +18,7 @@ struct NetworkTextMessage {
 
 pub(crate) fn spawn_network_listener(
     receiver: wasm_streams::readable::sys::ReadableStream,
-    cells: Rc<RefCell<Readable<Array>>>,
+    cell_metadata: Rc<RefCell<Readable<Array>>>,
     ui_state: UiState,
     local_endpoint_id: Option<String>,
 ) {
@@ -38,7 +38,7 @@ pub(crate) fn spawn_network_listener(
                         }
 
                         if let Err(err) = apply_incoming_mutation(
-                            &cells,
+                            &cell_metadata,
                             &ui_state,
                             MutationOrigin::Peer,
                             &message.text,
@@ -75,7 +75,7 @@ fn extract_message_text(event: &JsValue) -> Option<NetworkTextMessage> {
 }
 
 fn apply_incoming_mutation(
-    cells: &Rc<RefCell<Readable<Array>>>,
+    cell_metadata: &Rc<RefCell<Readable<Array>>>,
     ui_state: &UiState,
     origin: MutationOrigin,
     message_text: &str,
@@ -84,5 +84,5 @@ fn apply_incoming_mutation(
         return Ok(());
     };
 
-    apply_mutation_with_effects(cells, ui_state, mutation, origin)
+    apply_mutation_with_effects(cell_metadata, ui_state, mutation, origin)
 }

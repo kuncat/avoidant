@@ -1,3 +1,8 @@
+#[cfg(not(target_arch = "wasm32"))]
+compile_error!(
+    "The avoidant game crate is wasm32-only. Build with --target wasm32-unknown-unknown."
+);
+
 mod game_api;
 mod game_network;
 mod listener;
@@ -24,7 +29,6 @@ const TYPESCRIPT_TYPES: &str = r#"
 import type { Readable } from "svelte/store";
 "#;
 
-#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = initWasmThreadPool)]
 pub fn init_wasm_thread_pool(num_threads: usize) -> js_sys::Promise {
     wasm_bindgen_rayon::init_thread_pool(num_threads)
@@ -34,9 +38,15 @@ pub fn init_wasm_thread_pool(num_threads: usize) -> js_sys::Promise {
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct MapCell {
+    vertices: Vec<[f64; 3]>,
+}
+
+#[derive(Serialize, Deserialize, Tsify)]
+#[tsify(from_wasm_abi, into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct CellMetadataEntry {
     is_explored: bool,
     is_void: bool,
-    vertices: Vec<[f64; 3]>,
 }
 
 #[derive(Serialize, Deserialize, Tsify)]
@@ -143,6 +153,7 @@ impl Pulse {
 #[wasm_bindgen]
 pub struct GameState {
     cells: Rc<RefCell<Readable<Array>>>,
+    cell_metadata: Rc<RefCell<Readable<Array>>>,
     ui_state: UiState,
     num_cells: u64,
     rng_seed: u64,
@@ -162,20 +173,24 @@ extern "C" {
     #[wasm_bindgen(typescript_type = "Readable<Array<MapCell>>")]
     pub type MapCells;
 
+    #[wasm_bindgen(typescript_type = "Readable<Array<CellMetadataEntry>>")]
+    pub type CellMetadata;
+
     #[wasm_bindgen(typescript_type = "Readable<Array<Pulse>>")]
     pub type Pulses;
 }
 
 impl MapCell {
-    pub(crate) fn from_vertices(
-        vertices: Vec<[f64; 3]>,
-        is_explored: bool,
-        is_void: bool,
-    ) -> MapCell {
-        MapCell {
+    pub(crate) fn from_vertices(vertices: Vec<[f64; 3]>) -> MapCell {
+        MapCell { vertices }
+    }
+}
+
+impl CellMetadataEntry {
+    pub(crate) fn new(is_explored: bool, is_void: bool) -> Self {
+        Self {
             is_explored,
             is_void,
-            vertices,
         }
     }
 
