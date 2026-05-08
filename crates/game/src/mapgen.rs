@@ -63,25 +63,6 @@ pub(crate) async fn generate_map_cells_async(
     result.map_err(|err| JsValue::from_str(&err))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) async fn generate_map_cells_async(
-    requested_cell_count: usize,
-    rng_seed: u64,
-    max_samples: u32,
-    slack: f32,
-    spikiness: f64,
-    elevation_range: (f64, f64),
-) -> Result<Vec<MapCell>, JsValue> {
-    generate_map_cells(
-        requested_cell_count,
-        rng_seed,
-        max_samples,
-        slack,
-        spikiness,
-        elevation_range,
-    )
-}
-
 fn generate_map_cells_inner(
     requested_cell_count: usize,
     rng_seed: u64,
