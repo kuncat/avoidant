@@ -1,19 +1,56 @@
 <script module lang="ts">
+  import _fragmentShader from "./fragment.glsl?raw";
+  import _ribbonFragmentShader from "./ribbon.fragment.glsl?raw";
+
   export const MAX_PULSES = 16;
-  export const fragmentShader = `#define MAX_PULSES ${MAX_PULSES}\n` + _fragmentShader;
+
+  /**
+   * Byte offsets within each RGBA8 texel of the per-cell metadata texture.
+   *
+   * The GLSL side sees these as `#define CELL_META_*` constants (see {@link cellMetaDefines}).
+   */
+  export const CellMetaChannel = {
+    Explored: 0,
+    Void: 1,
+  } as const;
+
+  /**
+   * GLSL `#define` block exposing {@link CellMetaChannel} offsets to shaders.
+   */
+  export const cellMetaDefines = Object.entries(CellMetaChannel)
+    .map(([name, offset]) => `#define CELL_META_${name.toUpperCase()} ${offset}\n`)
+    .join("");
+
+  export const fragmentShader =
+    `#define MAX_PULSES ${MAX_PULSES}\n` + cellMetaDefines + _fragmentShader;
+  export const ribbonFragmentShader = cellMetaDefines + _ribbonFragmentShader;
 </script>
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import _fragmentShader from "./fragment.glsl?raw";
   import vertexShader from "./vertex.glsl?raw";
+  import ribbonVertexShader from "./ribbon.vertex.glsl?raw";
   import { Pulse } from "wasm-pkg";
   import type { GameState, MapCell } from "wasm-pkg";
-  import { T } from "@threlte/core";
+  import { T, useThrelte } from "@threlte/core";
   import { interactivity } from "@threlte/extras";
-  import { DoubleSide, Vector3 } from "three";
+  import {
+    BufferAttribute,
+    BufferGeometry,
+    Color,
+    DataTexture,
+    DoubleSide,
+    Mesh,
+    NearestFilter,
+    RGBAFormat,
+    ShaderMaterial,
+    UnsignedByteType,
+    Vector3,
+  } from "three";
 
   interactivity();
+
+  const { invalidate } = useThrelte();
 
   interface Props {
     gameState: GameState;
@@ -27,75 +64,257 @@
 
   onMount(() => {
     let rafId = 0;
-    const now = () => globalThis.performance?.now?.() ?? Date.now();
     const tick = () => {
-      nowMs = now();
+      const now = performance.now();
+      // Stay idle unless a pulse is animating.
+      const hasActive = $pulses.some((p) => now - p.createdAtMs < Math.max(1, p.durationMs));
+      if (hasActive) {
+        nowMs = now;
+        // Invalidate when remote state changes to draw a new frame.
+        invalidate();
+      }
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
   });
 
-  function triangulateCell(vertices: MapCell["vertices"]): Float32Array {
-    if (vertices.length < 3) return new Float32Array(0);
+  /**
+   * Build a merged triangle mesh for all cell interiors.
+   *
+   * Fan-triangulates each cell's polygon and packs every vertex with an `aCellIndex` attribute so the fragment shader can look up per-cell metadata in {@link CellMetaTexture}.
+   *
+   * @param cellList - Map cells whose `vertices` are `[x, y, height]` 3ples.
+   * @returns A `BufferGeometry` with `position` and `aCellIndex` attributes.
+   */
+  function buildTerrainLayer(cellList: MapCell[]): BufferGeometry {
+    const cellCount = cellList.length;
+    const positions: number[] = [];
+    const aCellIndex: number[] = [];
 
-    const [ax, ay, ah] = vertices[0];
-    const trianglePositions: number[] = [];
+    for (let i = 0; i < cellCount; i++) {
+      const vertices = cellList[i].vertices;
 
-    for (let i = 1; i < vertices.length - 1; i++) {
-      const [bx, by, bh] = vertices[i];
-      const [cx, cy, ch] = vertices[i + 1];
-      trianglePositions.push(ax, ah, ay, bx, bh, by, cx, ch, cy);
+      if (vertices.length >= 3) {
+        const [ax, ay, ah] = vertices[0];
+        for (let j = 1; j < vertices.length - 1; j++) {
+          const [bx, by, bh] = vertices[j];
+          const [cx, cy, ch] = vertices[j + 1];
+          positions.push(ax, ah, ay, bx, bh, by, cx, ch, cy);
+          for (let k = 0; k < 3; k++) aCellIndex.push(i);
+        }
+      }
     }
 
-    return new Float32Array(trianglePositions);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
+    geometry.setAttribute("aCellIndex", new BufferAttribute(new Float32Array(aCellIndex), 1));
+    return geometry;
   }
 
-  function cellEdgeRibbon(
-    vertices: MapCell["vertices"],
-    halfWidth: number,
-    lift: number,
-  ): Float32Array {
-    if (vertices.length < 2) return new Float32Array(0);
+  /**
+   * Build a merged ribbon mesh that traces each cell's edges as a thin quad strip.
+   *
+   * Each edge is extruded along its 2D normal by `halfWidth` and lifted by `lift` to sit above the terrain. Every emitted vertex carries an `aCellIndex` attribute so the fragment shader can discard ribbon segments that belong to void cells.
+   *
+   * @param cellList - Map cells whose `vertices` are `[x, y, height]` 3ples.
+   * @param halfWidth - Half the ribbon's width in world units.
+   * @param lift - Vertical offset added to each ribbon vertex.
+   * @returns A `BufferGeometry` with `position` and `aCellIndex` attributes.
+   */
+  function buildRibbonLayer(cellList: MapCell[], halfWidth: number, lift: number): BufferGeometry {
+    const cellCount = cellList.length;
+    const positions: number[] = [];
+    const aCellIndex: number[] = [];
 
-    const edgeTriangles: number[] = [];
+    for (let i = 0; i < cellCount; i++) {
+      const vertices = cellList[i].vertices;
 
-    for (let i = 0; i < vertices.length; i++) {
-      const [ax, ay, ah] = vertices[i];
-      const [bx, by, bh] = vertices[(i + 1) % vertices.length];
+      if (vertices.length >= 2) {
+        for (let v = 0; v < vertices.length; v++) {
+          const [ax, ay, ah] = vertices[v];
+          const [bx, by, bh] = vertices[(v + 1) % vertices.length];
+          const dx = bx - ax;
+          const dy = by - ay;
+          const length = Math.hypot(dx, dy);
+          if (length < 1e-6) continue;
 
-      const dx = bx - ax;
-      const dy = by - ay;
-      const length = Math.hypot(dx, dy);
-      if (length < 1e-6) continue;
+          const nx = (-dy / length) * halfWidth;
+          const ny = (dx / length) * halfWidth;
+          const yA = ah + lift;
+          const yB = bh + lift;
+          const aLx = ax + nx,
+            aLz = ay + ny;
+          const aRx = ax - nx,
+            aRz = ay - ny;
+          const bLx = bx + nx,
+            bLz = by + ny;
+          const bRx = bx - nx,
+            bRz = by - ny;
 
-      const nx = (-dy / length) * halfWidth;
-      const ny = (dx / length) * halfWidth;
-
-      const aLeft = [ax + nx, ah + lift, ay + ny];
-      const aRight = [ax - nx, ah + lift, ay - ny];
-      const bLeft = [bx + nx, bh + lift, by + ny];
-      const bRight = [bx - nx, bh + lift, by - ny];
-
-      edgeTriangles.push(...aLeft, ...aRight, ...bLeft, ...bLeft, ...aRight, ...bRight);
+          // Two triangles forming the edge quad.
+          positions.push(aLx, yA, aLz, aRx, yA, aRz, bLx, yB, bLz);
+          positions.push(bLx, yB, bLz, aRx, yA, aRz, bRx, yB, bRz);
+          for (let k = 0; k < 6; k++) aCellIndex.push(i);
+        }
+      }
     }
 
-    return new Float32Array(edgeTriangles);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
+    geometry.setAttribute("aCellIndex", new BufferAttribute(new Float32Array(aCellIndex), 1));
+    return geometry;
   }
 
-  let cellGeometries = $derived.by(() =>
-    Array.from($cells ?? []).map((cell) => ({
-      trianglePositions: triangulateCell(cell.vertices),
-      edgeRibbonBase: cellEdgeRibbon(cell.vertices, 0.24, 0.13),
-      edgeRibbonHighlight: cellEdgeRibbon(cell.vertices, 0.13, 0.16),
-    })),
+  /**
+   * One RGBA8 `DataTexture` of size N×1 holding per-cell metadata.
+   *
+   * Texel `i` stores the metadata for cell `i`; shaders sample it using `aCellIndex` as the U coordinate, which lets a single byte cover all of a cell's vertices across the terrain and ribbon layers without per-vertex metadata attributes.
+   */
+  class CellMetaTexture {
+    /** Underlying Three.js texture to be bound to shader uniforms. */
+    readonly texture: DataTexture;
+    /** Backing byte buffer aliased by {@link texture}. Layout: 4 bytes per cell. */
+    private readonly data: Uint8Array;
+    /** Number of texels/cells. */
+    readonly width: number;
+
+    /**
+     * Allocate a cell metadata texture.
+     */
+    constructor(cellCount: number) {
+      // Enforce a minimum width of 1 so the texture is always in a valid GPU-bindable state.
+      this.width = Math.max(1, cellCount);
+      this.data = new Uint8Array(this.width * 4);
+      this.texture = new DataTexture(this.data, this.width, 1, RGBAFormat, UnsignedByteType);
+      this.texture.minFilter = NearestFilter;
+      this.texture.magFilter = NearestFilter;
+      this.texture.generateMipmaps = false;
+      this.texture.needsUpdate = true;
+    }
+
+    /**
+     * Mark cell `cellIndex` as explored or unexplored.
+     *
+     * Call {@link flush} once after a batch of updates to schedule the GPU upload.
+     */
+    setExplored(cellIndex: number, value: boolean): void {
+      this.data[cellIndex * 4 + CellMetaChannel.Explored] = value ? 255 : 0;
+    }
+
+    /**
+     * Mark cell `cellIndex` as void (renders as a hole) or solid.
+     *
+     * Call {@link flush} once after a batch of updates to schedule the GPU upload.
+     */
+    setVoid(cellIndex: number, value: boolean): void {
+      this.data[cellIndex * 4 + CellMetaChannel.Void] = value ? 255 : 0;
+    }
+
+    /** Mark the texture dirty so Three.js re-uploads it on the next frame. */
+    flush(): void {
+      this.texture.needsUpdate = true;
+    }
+
+    /** Release the underlying GPU resources. */
+    dispose(): void {
+      this.texture.dispose();
+    }
+  }
+
+  const terrain = $derived(buildTerrainLayer($cells));
+  const ribbonBase = $derived(buildRibbonLayer($cells, 0.24, 0.13));
+  const ribbonHighlight = $derived(buildRibbonLayer($cells, 0.13, 0.16));
+  const cellMeta = $derived(new CellMetaTexture($cells.length));
+
+  // Dispose old GPU buffers when geometry / metadata texture is rebuilt.
+  $effect(() => {
+    const layers = [terrain, ribbonBase, ribbonHighlight];
+    const meta = cellMeta;
+    return () => {
+      layers.forEach((layer) => layer.dispose());
+      meta.dispose();
+    };
+  });
+
+  let terrainMaterial = $derived(
+    new ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      side: DoubleSide,
+      uniforms: {
+        elevationMin: { value: gameState.elevationMin },
+        elevationMax: { value: gameState.elevationMax },
+        uCellMeta: { value: cellMeta.texture },
+        uCellMetaSize: { value: cellMeta.width },
+        pulseCount: { value: 0 },
+        pulseTimers: { value: new Array(MAX_PULSES).fill(0) },
+        pulsePositions: {
+          value: new Array(MAX_PULSES).fill(null).map(() => new Vector3()),
+        },
+        pulseOriginCells: { value: new Array(MAX_PULSES).fill(-1) },
+        pulseIsRemote: { value: new Array(MAX_PULSES).fill(0) },
+      },
+    }),
   );
 
+  let ribbonBaseMaterial = $derived(
+    new ShaderMaterial({
+      vertexShader: ribbonVertexShader,
+      fragmentShader: ribbonFragmentShader,
+      side: DoubleSide,
+      uniforms: {
+        uColor: { value: new Color("#8fbdd0") },
+        uCellMeta: { value: cellMeta.texture },
+        uCellMetaSize: { value: cellMeta.width },
+      },
+    }),
+  );
+
+  let ribbonHighlightMaterial = $derived(
+    new ShaderMaterial({
+      vertexShader: ribbonVertexShader,
+      fragmentShader: ribbonFragmentShader,
+      side: DoubleSide,
+      uniforms: {
+        uColor: { value: new Color("#e7fbff") },
+        uCellMeta: { value: cellMeta.texture },
+        uCellMetaSize: { value: cellMeta.width },
+      },
+    }),
+  );
+
+  // Dispose materials when re-derived.
+  $effect(() => {
+    const materials = [terrainMaterial, ribbonBaseMaterial, ribbonHighlightMaterial];
+    return () => {
+      materials.forEach((material) => material.dispose());
+    };
+  });
+
+  let terrainMesh = $derived(new Mesh(terrain, terrainMaterial));
+  let ribbonBaseMesh = $derived(new Mesh(ribbonBase, ribbonBaseMaterial));
+  let ribbonHighlightMesh = $derived(new Mesh(ribbonHighlight, ribbonHighlightMaterial));
+
+  // Push cell metadata to the DataTexture used by shaders which sample it using `aCellIndex` so a single byte covers all of a cell's vertices in all three layers.
+  $effect(() => {
+    if ($cells.length === 0) return;
+    if (!$cellMetadata) return;
+
+    const meta = cellMeta;
+    for (let i = 0; i < $cellMetadata.length; i++) {
+      meta.setExplored(i, $cellMetadata[i].isExplored);
+      meta.setVoid(i, $cellMetadata[i].isVoid);
+    }
+    meta.flush();
+    invalidate();
+  });
+
   const pulsesArray = $derived(
-    Array.from($pulses ?? [])
+    Array.from($pulses)
       .reverse()
       .slice(0, MAX_PULSES)
-      .concat(Array(Math.max(0, MAX_PULSES - ($pulses ?? []).length)).fill(Pulse.nullPulse())),
+      .concat(Array(Math.max(0, MAX_PULSES - $pulses.length)).fill(Pulse.nullPulse())),
   );
   let pulseTimersUniform = $derived(
     pulsesArray.map((p) => {
@@ -110,64 +329,25 @@
   );
   let pulseOriginCellsUniform = $derived(pulsesArray.map((p) => p.originCell));
   let pulseIsRemoteUniform = $derived(pulsesArray.map((p) => (p.isRemote ? 1 : 0)));
+
+  $effect(() => {
+    terrainMaterial.uniforms.pulseCount.value = Math.min($pulses.length, MAX_PULSES);
+    terrainMaterial.uniforms.pulseTimers.value = pulseTimersUniform;
+    terrainMaterial.uniforms.pulsePositions.value = pulsePositionsUniform;
+    terrainMaterial.uniforms.pulseOriginCells.value = pulseOriginCellsUniform;
+    terrainMaterial.uniforms.pulseIsRemote.value = pulseIsRemoteUniform;
+    invalidate();
+  });
+
+  function handleTerrainClick(event: { point: Vector3; face: { a: number } | null }) {
+    if (!event.face || $cells.length === 0) return;
+    const aCellIndexArr = terrain.attributes.aCellIndex.array as Float32Array;
+    const cellIndex = aCellIndexArr[event.face.a];
+    if (cellIndex === undefined) return;
+    gameState.queueExplorePulse(cellIndex, event.point.x, event.point.y, event.point.z);
+  }
 </script>
 
-<T.Group>
-  {#each cellGeometries as geometry, cellIndex (cellIndex)}
-    {@const metadata = $cellMetadata[cellIndex]}
-    {#if geometry.trianglePositions.length > 0 && !metadata?.isVoid}
-      <T.Mesh
-        onclick={(event: { point: Vector3 }) =>
-          gameState.queueExplorePulse(cellIndex, event.point.x, event.point.y, event.point.z)}
-      >
-        <T.BufferGeometry attach="geometry">
-          <T.BufferAttribute attach="attributes.position" args={[geometry.trianglePositions, 3]} />
-        </T.BufferGeometry>
-        <T.ShaderMaterial
-          side={DoubleSide}
-          {fragmentShader}
-          {vertexShader}
-          uniforms={{
-            isExplored: { value: 0 },
-            elevationMin: { value: gameState.elevationMin },
-            elevationMax: { value: gameState.elevationMax },
-            cellIndex: { value: 0 },
-            pulseCount: { value: 0 },
-            pulseTimers: { value: new Array(MAX_PULSES).fill(0) },
-            pulsePositions: { value: new Array(MAX_PULSES).fill(null).map(() => new Vector3()) },
-            pulseOriginCells: { value: new Array(MAX_PULSES).fill(-1) },
-            pulseIsRemote: { value: new Array(MAX_PULSES).fill(0) },
-          }}
-          uniforms.isExplored.value={metadata?.isExplored ? 1.0 : 0.0}
-          uniforms.cellIndex.value={cellIndex}
-          uniforms.pulseCount.value={Math.min(($pulses ?? []).length, MAX_PULSES)}
-          uniforms.pulseTimers.value={pulseTimersUniform}
-          uniforms.pulsePositions.value={pulsePositionsUniform}
-          uniforms.pulseOriginCells.value={pulseOriginCellsUniform}
-          uniforms.pulseIsRemote.value={pulseIsRemoteUniform}
-        />
-      </T.Mesh>
-
-      {#if geometry.edgeRibbonBase.length > 0}
-        <T.Mesh>
-          <T.BufferGeometry attach="geometry">
-            <T.BufferAttribute attach="attributes.position" args={[geometry.edgeRibbonBase, 3]} />
-          </T.BufferGeometry>
-          <T.MeshBasicMaterial attach="material" color="#8fbdd0" side={DoubleSide} />
-        </T.Mesh>
-      {/if}
-
-      {#if geometry.edgeRibbonHighlight.length > 0}
-        <T.Mesh>
-          <T.BufferGeometry attach="geometry">
-            <T.BufferAttribute
-              attach="attributes.position"
-              args={[geometry.edgeRibbonHighlight, 3]}
-            />
-          </T.BufferGeometry>
-          <T.MeshBasicMaterial attach="material" color="#e7fbff" side={DoubleSide} />
-        </T.Mesh>
-      {/if}
-    {/if}
-  {/each}
-</T.Group>
+<T is={terrainMesh} onclick={handleTerrainClick} />
+<T is={ribbonBaseMesh} />
+<T is={ribbonHighlightMesh} />

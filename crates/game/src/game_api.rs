@@ -177,26 +177,45 @@ impl GameState {
         Ok(output_cells.into())
     }
 
-    #[wasm_bindgen(js_name = "generateMapAsync")]
-    pub async fn generate_map_async(&mut self) -> Result<JsValue, JsValue> {
+    /// Synchronously generate the map on the current thread.
+    ///
+    /// This blocks the caller. The UI uses a dedicated Web Worker that calls
+    /// the standalone [`crate::mapgen::generate_map_cells_js`] entry point and
+    /// then passes the result to [`GameState::apply_map_cells`]; this method
+    /// is retained for tests and headless scripting only.
+    #[wasm_bindgen(js_name = "generateMap", unchecked_return_type = "MapCell[]")]
+    pub fn generate_map(&mut self) -> Result<JsValue, JsValue> {
         if self.num_cells > usize::MAX as u64 {
             return Err(JsValue::from_str(
                 "numCells is too large for this target architecture",
             ));
         }
 
-        let requested_cell_count = self.num_cells as usize;
-        let cells = mapgen::generate_map_cells_async(
-            requested_cell_count,
+        let cells = mapgen::generate_map_cells(
+            self.num_cells as usize,
             self.rng_seed,
             self.max_samples,
             self.slack,
             self.spikiness,
             (self.elevation_min, self.elevation_max),
         )
-        .await?;
+        .map_err(|err| JsValue::from_str(&err))?;
 
         self.apply_generated_cells(cells)
+    }
+
+    /// Apply cells produced off-thread (typically by the mapgen Web Worker).
+    ///
+    /// `cells` must be a JS array of objects matching the `MapCell` shape
+    /// (i.e. `{ vertices: [[x, y, z], ...] }`).
+    #[wasm_bindgen(js_name = "applyMapCells", unchecked_return_type = "MapCell[]")]
+    pub fn apply_map_cells(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "MapCell[]")] cells: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let parsed: Vec<MapCell> = serde_wasm_bindgen::from_value(cells)
+            .map_err(|err| JsValue::from_str(&format!("Invalid map cells payload: {err}")))?;
+        self.apply_generated_cells(parsed)
     }
 
     #[wasm_bindgen(js_name = "exploreCell")]
@@ -251,8 +270,8 @@ impl GameState {
             .map_err(Into::<JsValue>::into)
     }
 
-    #[wasm_bindgen(js_name = "joinFromTicket")]
-    pub async fn join_from_ticket(ticket: String, nickname: String) -> Result<GameState, JsValue> {
+    #[wasm_bindgen(js_name = "optionsFromTicket")]
+    pub fn options_from_ticket(ticket: String) -> Result<GameOptions, JsValue> {
         let parsed_ticket = GameTicket::deserialize(&ticket)
             .map_err(|err| JsValue::from_str(&format!("Invalid game ticket: {err}")))?;
         let options_json = parsed_ticket
@@ -260,23 +279,28 @@ impl GameState {
             .ok_or_else(|| JsValue::from_str("Ticket does not include game options"))?;
         let options_value = JSON::parse(&options_json)?;
         let options: GameOptions = serde_wasm_bindgen::from_value(options_value)?;
-        let mut state = GameState::new(options)?;
-        state.generate_map_async().await?;
+        Ok(options)
+    }
 
+    /// Spawn a network node and join the gossip topic described by `ticket`.
+    ///
+    /// The caller is responsible for having populated the map cells (typically
+    /// via [`GameState::apply_map_cells`]) before invoking this; the function
+    /// only concerns itself with bringing the network layer online.
+    #[wasm_bindgen(js_name = "joinAsPeer")]
+    pub async fn join_as_peer(&mut self, ticket: String, nickname: String) -> Result<(), JsValue> {
         let node = NetworkNode::spawn().await.map_err(Into::<JsValue>::into)?;
         let channel = node
             .join(ticket, nickname)
             .await
             .map_err(Into::<JsValue>::into)?;
-        state
-            .connected_endpoints
+        self.connected_endpoints
             .borrow_mut()
             .extend(channel.neighbors());
-        state.network_node = Some(node);
-        state.network_channel = Some(channel);
-        state.attach_network_listener();
-        state.sync_network_snapshot();
-
-        Ok(state)
+        self.network_node = Some(node);
+        self.network_channel = Some(channel);
+        self.attach_network_listener();
+        self.sync_network_snapshot();
+        Ok(())
     }
 }

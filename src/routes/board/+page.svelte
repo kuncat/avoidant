@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import init, { GameState, initWasmThreadPool } from "wasm-pkg";
+  import init, { GameState, type GameOptions } from "wasm-pkg";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
   import { MOUSE } from "three";
   import Board from "$lib/components/board.svelte";
+  import { generateMap } from "$lib/workers/mapgen-client";
 
   let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
@@ -150,13 +151,9 @@
       try {
         status = "Loading...";
         await init();
-
-        status = "Starting worker threads...";
-        const threadCount = Math.max(2, navigator.hardwareConcurrency ?? 4);
-        await initWasmThreadPool(threadCount);
         status = undefined;
       } catch (error) {
-        status = "Failed to initialize wasm thread pool.";
+        status = "Failed to initialize wasm.";
         console.error("Failed to initialize wasm", error);
       }
     };
@@ -170,15 +167,16 @@
 
   async function startGame() {
     try {
-      status = "Generating map...";
-      gameState = new GameState({
+      const options: GameOptions = {
         elevationMax: 6.0,
         elevationMin: 0.0,
         numCells: $state.snapshot(numCellsInput),
         rngSeed: $state.snapshot(rngSeedInput),
         spikiness: 0.8,
-      });
-      await gameState.generateMapAsync();
+      };
+      status = "Generating map...";
+      gameState = new GameState(options);
+      gameState.applyMapCells(await generateMap(options));
       inviteTicket = "";
     } catch (error) {
       console.error("Failed to start game", error);
@@ -191,7 +189,12 @@
   async function joinGame() {
     try {
       status = "Joining game...";
-      gameState = await GameState.joinFromTicket(ticketInput, playerNameInput);
+      const options = GameState.optionsFromTicket(ticketInput);
+      gameState = new GameState(options);
+      status = "Generating map...";
+      gameState.applyMapCells(await generateMap(options));
+      status = "Joining game...";
+      await gameState.joinAsPeer(ticketInput, playerNameInput);
       inviteTicket = "";
     } catch (error) {
       console.error("Failed to join game", error);

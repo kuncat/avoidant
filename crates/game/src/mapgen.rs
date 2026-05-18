@@ -1,48 +1,15 @@
 use bluenoise::BlueNoise;
-use futures_channel::oneshot;
 use rand::RngCore;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use rayon::prelude::*;
 use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::JsValue;
+use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::MapCell;
+use crate::{GameOptions, MapCell};
 
-pub(crate) async fn generate_map_cells_async(
-    requested_cell_count: usize,
-    rng_seed: u64,
-    max_samples: u32,
-    slack: f32,
-    spikiness: f64,
-    elevation_range: (f64, f64),
-) -> Result<Vec<MapCell>, JsValue> {
-    if rayon::current_num_threads() <= 1 {
-        return Err(JsValue::from_str(
-            "WASM thread pool is not initialized. Call initWasmThreadPool(...) after init().",
-        ));
-    }
-
-    let (sender, receiver) = oneshot::channel();
-    rayon::spawn(move || {
-        let _ = sender.send(generate_map_cells_inner(
-            requested_cell_count,
-            rng_seed,
-            max_samples,
-            slack,
-            spikiness,
-            elevation_range,
-        ));
-    });
-
-    let result = receiver
-        .await
-        .map_err(|_| JsValue::from_str("Map generation task was cancelled"))?;
-    result.map_err(|err| JsValue::from_str(&err))
-}
-
-fn generate_map_cells_inner(
+pub(crate) fn generate_map_cells(
     requested_cell_count: usize,
     rng_seed: u64,
     max_samples: u32,
@@ -60,20 +27,57 @@ fn generate_map_cells_inner(
         ));
     };
 
-    let output_cells: Vec<MapCell> = diagram
-        .cells()
-        .par_iter()
-        .map(|polygon| {
-            let mut vertices = Vec::new();
-            for point in polygon.points() {
-                let height = vertex_height(point.x, point.y, rng_seed, spikiness, elevation_range);
-                vertices.push([point.x, point.y, height]);
-            }
-            MapCell::from_vertices(vertices)
-        })
-        .collect();
+    let cells = diagram.cells();
+    let mut output_cells = Vec::with_capacity(cells.len());
+    for polygon in cells {
+        let mut vertices = Vec::with_capacity(polygon.points().len());
+        for point in polygon.points() {
+            let height = vertex_height(point.x, point.y, rng_seed, spikiness, elevation_range);
+            vertices.push([point.x, point.y, height]);
+        }
+        output_cells.push(MapCell::from_vertices(vertices));
+    }
 
     Ok(output_cells)
+}
+
+/// Wasm entry point used by the dedicated map-generation Web Worker.
+///
+/// The worker hosts its own wasm instance, calls this function, and posts the
+/// resulting cells back to the main thread. Running mapgen in a worker keeps
+/// the UI responsive without forcing the main wasm bundle to be built with
+/// `+atomics` / shared memory (which would make iroh's main-thread async
+/// trap on `memory.atomic.wait32`).
+#[wasm_bindgen(js_name = "generateMapCells", unchecked_return_type = "MapCell[]")]
+pub fn generate_map_cells_js(options: GameOptions) -> Result<JsValue, JsValue> {
+    if options.num_cells > usize::MAX as u64 {
+        return Err(JsValue::from_str(
+            "numCells is too large for this target architecture",
+        ));
+    }
+
+    let max_samples = options.max_samples.unwrap_or(20.0).clamp(1.0, 128.0) as u32;
+    let slack = options.slack.unwrap_or(0.25).clamp(0.0, 0.95) as f32;
+    let spikiness = options.spikiness.unwrap_or(0.4).clamp(0.0, 1.0);
+    let elevation_min = options.elevation_min.unwrap_or(-0.4);
+    let elevation_max = options.elevation_max.unwrap_or(0.4);
+
+    let cells = generate_map_cells(
+        options.num_cells as usize,
+        options.rng_seed,
+        max_samples,
+        slack,
+        spikiness,
+        (elevation_min, elevation_max),
+    )
+    .map_err(|err| JsValue::from_str(&err))?;
+
+    let output = js_sys::Array::new();
+    for cell in cells {
+        let cell_value = serde_wasm_bindgen::to_value(&cell)?;
+        output.push(&cell_value);
+    }
+    Ok(output.into())
 }
 
 /// Computes terrain elevation for a world-space point using layered value noise.

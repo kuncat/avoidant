@@ -33,11 +33,6 @@ const TYPESCRIPT_TYPES: &str = r#"
 import type { Readable } from "svelte/store";
 "#;
 
-#[wasm_bindgen(js_name = initWasmThreadPool)]
-pub fn init_wasm_thread_pool(num_threads: usize) -> js_sys::Promise {
-    wasm_bindgen_rayon::init_thread_pool(num_threads)
-}
-
 #[derive(Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]

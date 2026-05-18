@@ -1,10 +1,11 @@
 varying vec3 vWorldPosition;
 varying float vHeight;
+varying float vCellIndex;
 
-uniform float isExplored;
 uniform float elevationMin;
 uniform float elevationMax;
-uniform float cellIndex;
+uniform sampler2D uCellMeta;
+uniform float uCellMetaSize;
 uniform int pulseCount;
 uniform float pulseTimers[MAX_PULSES];
 uniform vec3 pulsePositions[MAX_PULSES];
@@ -17,6 +18,12 @@ float remapClamped(float value, float inMin, float inMax, float outMin, float ou
 }
 
 void main() {
+  vec2 metaUv = vec2((vCellIndex + 0.5) / uCellMetaSize, 0.5);
+  vec4 meta = texture2D(uCellMeta, metaUv);
+  float isVoid = meta[CELL_META_VOID];
+  float isExplored = meta[CELL_META_EXPLORED];
+  if (isVoid > 0.5) discard;
+
   float elevation = remapClamped(vHeight, elevationMin, elevationMax, 0.0, 1.0);
 
   float totalRing = 0.0;
@@ -42,7 +49,7 @@ void main() {
     remoteRing = max(remoteRing, ringContribution * isRemote);
 
     // Sweep coloring only for pulses that originated from this cell
-    float isPulseOriginCell = step(abs(pulseOriginCells[i] - cellIndex), 0.5);
+    float isPulseOriginCell = step(abs(pulseOriginCells[i] - vCellIndex), 0.5);
     float pulseSweep = step(distToOrigin / 20.0, pulseProgress);
     totalSweep = max(totalSweep, pulseSweep * isPulseOriginCell);
     hasSweep = max(hasSweep, isPulseOriginCell);
