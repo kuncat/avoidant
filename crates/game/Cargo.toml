@@ -29,7 +29,7 @@ js-sys = "0.3"
 n0-future = "0.3.2"
 networking = { workspace = true }
 rand = "0.9"
-rand_xoshiro = "0.7"
+rand_xoshiro = "0.8"
 serde = "1.0.228"
 serde-wasm-bindgen = "0.6.5"
 svelte-store = "0.1.3"
