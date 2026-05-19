@@ -247,6 +247,9 @@
         elevationMax: { value: gameState.elevationMax },
         uCellMeta: { value: cellMeta.texture },
         uCellMetaSize: { value: cellMeta.width },
+        uLightDir: { value: new Vector3(0.45, 1.0, 0.3).normalize() },
+        uAmbient: { value: 0.55 },
+        uDiffuse: { value: 0.75 },
         pulseCount: { value: 0 },
         pulseTimers: { value: new Array(MAX_PULSES).fill(0) },
         pulsePositions: {

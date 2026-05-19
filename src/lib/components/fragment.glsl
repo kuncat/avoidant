@@ -11,6 +11,9 @@ uniform float pulseTimers[MAX_PULSES];
 uniform vec3 pulsePositions[MAX_PULSES];
 uniform float pulseOriginCells[MAX_PULSES];
 uniform float pulseIsRemote[MAX_PULSES];
+uniform vec3 uLightDir;
+uniform float uAmbient;
+uniform float uDiffuse;
 
 float remapClamped(float value, float inMin, float inMax, float outMin, float outMax) {
   float t = clamp((value - inMin) / (inMax - inMin), 0.0, 1.0);
@@ -65,6 +68,14 @@ void main() {
   vec3 lowColor = mix(unexploredLow, exploredLow, 1.0 - colorFactor);
   vec3 highColor = mix(unexploredHigh, exploredHigh, 1.0 - colorFactor);
   vec3 terrainColor = mix(lowColor, highColor, elevation);
+
+  // Flat-shaded hillshading: derive per-face normal from screen-space derivatives
+  // of world position so each triangle gets its own light contribution.
+  vec3 faceNormal = normalize(cross(dFdx(vWorldPosition), dFdy(vWorldPosition)));
+  if (faceNormal.y < 0.0) faceNormal = -faceNormal;
+  float ndotl = max(dot(faceNormal, normalize(uLightDir)), 0.0);
+  float shade = clamp(uAmbient + uDiffuse * ndotl, 0.0, 1.5);
+  terrainColor *= shade;
 
   vec3 localPulseTint = vec3(0.55, 0.95, 1.0);
   vec3 remotePulseTint = vec3(1.0, 0.42, 0.38);
