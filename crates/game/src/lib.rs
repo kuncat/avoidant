@@ -1,13 +1,9 @@
-#[cfg(not(target_arch = "wasm32"))]
-compile_error!(
-    "The avoidant game crate is wasm32-only. Build with --target wasm32-unknown-unknown."
-);
-
 mod game_api;
 mod game_network;
 mod listener;
 mod mapgen;
 mod mutation;
+mod score;
 mod ui_state;
 mod utils;
 
@@ -24,6 +20,7 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 mod net;
 use net::NetworkNode;
+pub use score::ScoreState;
 pub use ui_state::UiState;
 
 const PULSE_DURATION_MS: u32 = 250; // TODO: Decrease after testing
@@ -104,8 +101,7 @@ pub struct GameOptions {
     /** Maximum vertex height in world units. Default: 0.4 */
     elevation_max: Option<f64>,
     #[tsify(optional)]
-    /** Fraction of cells to mark as void (impassable holes) in `[0.0, 1.0]`.
-     * Selection is deterministic for a given `rngSeed`. Default: 0.15625 */
+    // Fraction of cells to mark as void in `[0.0, 1.0]`.
     void_fraction: Option<f64>,
 }
 
@@ -193,6 +189,7 @@ impl Pulse {
 pub struct GameState {
     cells: Rc<RefCell<Readable<Array>>>,
     cell_metadata: Rc<RefCell<Readable<Array>>>,
+    score: Rc<RefCell<Readable<ScoreState>>>,
     network_snapshot: Rc<RefCell<Readable<NetworkSnapshot>>>,
     connected_endpoints: Rc<RefCell<BTreeSet<String>>>,
     peer_presence: Rc<RefCell<HashMap<String, PeerPresenceEntry>>>,
@@ -220,6 +217,9 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "Readable<Array<CellMetadataEntry>>")]
     pub type CellMetadata;
+
+    #[wasm_bindgen(typescript_type = "Readable<ScoreState>")]
+    pub type Score;
 
     #[wasm_bindgen(typescript_type = "Readable<NetworkSnapshot>")]
     pub type NetworkSnapshotStore;

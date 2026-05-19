@@ -264,9 +264,9 @@
   // `*_LIFT_FACTOR`: vertical offset above the terrain, also as a fraction of cell radius (keeps z-fight margin proportional and prevents the sheen from towering over tiny cells at high counts).
   const MAP_AREA = 100 * 100;
   const RIBBON_BASE_HALF_WIDTH_FACTOR = 0.025;
-  const RIBBON_BASE_LIFT_FACTOR = 0.01;
-  const RIBBON_HIGHLIGHT_HALF_WIDTH_FACTOR = 0.01;
-  const RIBBON_HIGHLIGHT_LIFT_FACTOR = 0.036;
+  const RIBBON_BASE_LIFT_FACTOR = 0.001;
+  const RIBBON_HIGHLIGHT_HALF_WIDTH_FACTOR = 0.005;
+  const RIBBON_HIGHLIGHT_LIFT_FACTOR = 0.0011;
   const cellRadius = $derived(Math.sqrt(MAP_AREA / (Math.PI * Math.max(1, $cells.length))));
   const ribbonBase = $derived(
     buildRibbonLayer(

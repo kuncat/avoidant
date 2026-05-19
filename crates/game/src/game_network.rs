@@ -16,6 +16,7 @@ impl GameState {
         };
 
         let cell_metadata = self.cell_metadata.clone();
+        let score = self.score.clone();
         let ui_state = self.ui_state.clone();
         let connected_endpoints = self.connected_endpoints.clone();
         let peer_presence = self.peer_presence.clone();
@@ -30,6 +31,7 @@ impl GameState {
         listener::spawn_network_listener(
             receiver,
             cell_metadata,
+            score,
             ui_state,
             connected_endpoints,
             peer_presence,
@@ -47,7 +49,13 @@ impl GameState {
         mutation: Mutation,
         origin: MutationOrigin,
     ) -> Result<(), JsValue> {
-        apply_mutation_with_effects(&self.cell_metadata, &self.ui_state, mutation, origin)?;
+        apply_mutation_with_effects(
+            &self.cell_metadata,
+            &self.score,
+            &self.ui_state,
+            mutation,
+            origin,
+        )?;
 
         if matches!(origin, MutationOrigin::Local) {
             *self.last_outbound_mutation_ms.borrow_mut() = Some(js_sys::Date::now());

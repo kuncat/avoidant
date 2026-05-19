@@ -10,9 +10,10 @@ use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use crate::mapgen;
 use crate::mutation::{Mutation, MutationOrigin};
 use crate::net::TicketOpts;
+use crate::score::ScoreState;
 use crate::{
     CellMetadata, CellMetadataEntry, GameOptions, GameState, MapCell, MapCells, NetworkNode,
-    NetworkPeerStatus, NetworkSnapshot, NetworkSnapshotStore, UiState, utils,
+    NetworkPeerStatus, NetworkSnapshot, NetworkSnapshotStore, Score, UiState, utils,
 };
 use networking::GameTicket;
 
@@ -38,6 +39,13 @@ impl GameState {
         Ok(GameState {
             cells: Rc::new(RefCell::new(Readable::new(Array::new()))),
             cell_metadata: Rc::new(RefCell::new(Readable::new(Array::new()))),
+            score: Rc::new(RefCell::new(Readable::new_mapped(
+                ScoreState::default(),
+                |state| {
+                    serde_wasm_bindgen::to_value(state)
+                        .expect("score state serialization should not fail")
+                },
+            ))),
             network_snapshot: Rc::new(RefCell::new(Readable::new_mapped(
                 initial_network_snapshot,
                 |snapshot| {
@@ -73,6 +81,12 @@ impl GameState {
     #[wasm_bindgen(getter, js_name = "cellMetadata")]
     pub fn cell_metadata_store(&self) -> CellMetadata {
         self.cell_metadata.borrow().get_store().into()
+    }
+
+    /// TODO(peer-join-sync): when peer-join state sync is implemented, the inviter should snapshot this store and send it alongside `cell_metadata` so a joining peer starts with the correct score, streak, and counters.
+    #[wasm_bindgen(getter, js_name = "score")]
+    pub fn score_store(&self) -> Score {
+        self.score.borrow().get_store().into()
     }
 
     #[wasm_bindgen(getter, js_name = "networkSnapshot")]
@@ -168,6 +182,7 @@ impl GameState {
     fn apply_generated_cells(&mut self, cells: Vec<MapCell>) -> Result<JsValue, JsValue> {
         let cell_count = cells.len();
         let void_mask = compute_void_mask(cell_count, self.rng_seed, self.void_fraction);
+        let void_total = void_mask.iter().filter(|v| **v).count();
 
         let output_cells = Array::new();
         let output_metadata = Array::new();
@@ -182,6 +197,9 @@ impl GameState {
 
         self.cells.borrow_mut().set(output_cells.clone());
         self.cell_metadata.borrow_mut().set(output_metadata);
+        self.score.borrow_mut().set_with(|state| {
+            state.reset_for_map(cell_count as u32, void_total as u32);
+        });
         Ok(output_cells.into())
     }
 
@@ -314,12 +332,6 @@ impl GameState {
 }
 
 /// Deterministically choose which cell indices are void.
-///
-/// Builds a permutation of `[0, cell_count)` seeded from `rng_seed` (with a
-/// namespacing constant so the void selection is independent of any other
-/// seed-derived choices) and marks the first `floor(cell_count * fraction)`
-/// indices as void. This guarantees the exact requested fraction and is fully
-/// reproducible across peers that share the same `rng_seed` and `fraction`.
 fn compute_void_mask(cell_count: usize, rng_seed: u64, fraction: f64) -> Vec<bool> {
     let mut mask = vec![false; cell_count];
     if cell_count == 0 || fraction <= 0.0 {

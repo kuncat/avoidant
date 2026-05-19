@@ -29,6 +29,7 @@
   );
   let isGeneratingInvite = $state(false);
   let networkSnapshot = $derived(gameState?.networkSnapshot);
+  let score = $derived(gameState?.score);
   let connectedPeerCount = $derived(
     ($networkSnapshot?.peers ?? []).filter((peer) => peer.isConnected).length,
   );
@@ -261,6 +262,20 @@
         Avoidant
       </h1>
       {#if gameState}
+        {#if $score}
+          <div class="text-sm text-slate-600">
+            Score: <strong class="text-slate-800">{Math.round($score.score)}</strong>
+            <span class="opacity-70">({Math.round($score.efficiency * 100)}%)</span>
+            {#if $score.streak > 1}
+              <span class="ml-2 opacity-70"
+                >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)} streak</span
+              >
+            {/if}
+            {#if $score.completed}
+              <span class="ml-2 font-semibold text-emerald-600">Cleared!</span>
+            {/if}
+          </div>
+        {/if}
         <div class="ml-auto text-sm text-slate-600">
           {#if connectedPeerCount > 0}
             Players: <strong class="text-slate-800">{connectedPeerCount + 1}</strong>

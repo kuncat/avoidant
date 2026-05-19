@@ -6,6 +6,7 @@ use svelte_store::Readable;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
+use crate::score::{self, ScoreState};
 use crate::{CellMetadataEntry, PULSE_DURATION_MS, UiState};
 
 const MUTATION_DELIMITER: char = '|';
@@ -106,9 +107,15 @@ impl Mutation {
         Some(mutation)
     }
 
-    fn apply(self, cell_metadata: &Rc<RefCell<Readable<Array>>>) -> Result<(), JsValue> {
+    fn apply(
+        self,
+        cell_metadata: &Rc<RefCell<Readable<Array>>>,
+        score_state: &Rc<RefCell<Readable<ScoreState>>>,
+    ) -> Result<(), JsValue> {
         match self {
-            Self::ExploreCell { index, .. } => mark_cell_explored(cell_metadata, index),
+            Self::ExploreCell { index, .. } => {
+                mark_cell_explored(cell_metadata, score_state, index)
+            }
         }
     }
 }
@@ -121,6 +128,7 @@ pub(crate) enum MutationOrigin {
 
 pub(crate) fn apply_mutation_with_effects(
     cell_metadata: &Rc<RefCell<Readable<Array>>>,
+    score_state: &Rc<RefCell<Readable<ScoreState>>>,
     ui_state: &UiState,
     mutation: Mutation,
     origin: MutationOrigin,
@@ -138,9 +146,10 @@ pub(crate) fn apply_mutation_with_effects(
         .map(|_| ())?;
 
     let delayed_cell_metadata = cell_metadata.clone();
+    let delayed_score_state = score_state.clone();
     spawn_local(async move {
         n0_future::time::sleep(Duration::from_millis(PULSE_DURATION_MS as u64)).await;
-        if let Err(err) = mutation.apply(&delayed_cell_metadata) {
+        if let Err(err) = mutation.apply(&delayed_cell_metadata, &delayed_score_state) {
             tracing::warn!("failed to apply delayed mutation: {:?}", err);
         }
     });
@@ -150,25 +159,43 @@ pub(crate) fn apply_mutation_with_effects(
 
 fn mark_cell_explored(
     cell_metadata: &Rc<RefCell<Readable<Array>>>,
+    score_state: &Rc<RefCell<Readable<ScoreState>>>,
     index: usize,
 ) -> Result<(), JsValue> {
-    cell_metadata.borrow_mut().set_with(|metadata_array| {
-        if index >= metadata_array.length() as usize {
-            return Ok::<(), JsValue>(());
-        }
+    // Returns `Some(is_void)` only when the cell transitioned from
+    // unexplored to explored; `None` means we should not touch the score.
+    let transitioned_void: Option<bool> =
+        cell_metadata.borrow_mut().set_with(|metadata_array| {
+            if index >= metadata_array.length() as usize {
+                return Ok::<Option<bool>, JsValue>(None);
+            }
 
-        let metadata = metadata_array.get(index as u32);
-        let mut typed_metadata: CellMetadataEntry = serde_wasm_bindgen::from_value(metadata)
-            .map_err(|err| {
-                JsValue::from_str(&format!("Failed to decode cell metadata from store: {err}"))
-            })?;
-        typed_metadata.mark_explored();
+            let metadata = metadata_array.get(index as u32);
+            let mut typed_metadata: CellMetadataEntry = serde_wasm_bindgen::from_value(metadata)
+                .map_err(|err| {
+                    JsValue::from_str(&format!("Failed to decode cell metadata from store: {err}"))
+                })?;
 
-        let updated_metadata = serde_wasm_bindgen::to_value(&typed_metadata).map_err(|err| {
-            JsValue::from_str(&format!("Failed to encode updated cell metadata: {err}"))
+            if typed_metadata.is_explored {
+                // Already explored — score must not double-count.
+                return Ok(None);
+            }
+
+            let is_void = typed_metadata.is_void;
+            typed_metadata.mark_explored();
+
+            let updated_metadata =
+                serde_wasm_bindgen::to_value(&typed_metadata).map_err(|err| {
+                    JsValue::from_str(&format!("Failed to encode updated cell metadata: {err}"))
+                })?;
+            metadata_array.set(index as u32, updated_metadata);
+
+            Ok(Some(is_void))
         })?;
-        metadata_array.set(index as u32, updated_metadata);
 
-        Ok(())
-    })
+    if let Some(is_void) = transitioned_void {
+        score::update_on_explore(score_state, is_void);
+    }
+
+    Ok(())
 }
