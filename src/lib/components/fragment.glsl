@@ -86,9 +86,8 @@ void main() {
   vec3 pulseTint = mix(localPulseTint, remotePulseTint, remoteFactor);
   vec3 finalColor = mix(terrainColor, pulseTint, totalRing * 0.85);
 
-  // Fade alpha while an explored void cell is falling. Non-void / unexplored
-  // cells keep alpha = 1.0 so the transparent material draws them opaquely.
-  float alpha = 1.0;
+  float alpha = isExplored > 0.5 ? 1.0 : 0.25;
+  // Fade alpha while an explored void cell is falling.
   if (isVoid > 0.5 && isExplored > 0.5) {
     alpha = clamp(1.0 - vFallProgress, 0.0, 1.0);
   }
