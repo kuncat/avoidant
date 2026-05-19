@@ -1,8 +1,12 @@
 <script module lang="ts">
+  import _vertexShader from "./vertex.glsl?raw";
   import _fragmentShader from "./fragment.glsl?raw";
+  import _ribbonVertexShader from "./ribbon.vertex.glsl?raw";
   import _ribbonFragmentShader from "./ribbon.fragment.glsl?raw";
 
   export const MAX_PULSES = 16;
+  export const VOID_FALL_DURATION_MS = 900;
+  export const VOID_FALL_DISTANCE = 8;
 
   /**
    * Byte offsets within each RGBA8 texel of the per-cell metadata texture.
@@ -12,15 +16,24 @@
   export const CellMetaChannel = {
     Explored: 0,
     Void: 1,
+    // 0..255 fall-out progress for explored void cells; 0 = on the map, 255 = fully gone.
+    FallProgress: 2,
   } as const;
 
   /**
    * GLSL `#define` block exposing {@link CellMetaChannel} offsets to shaders.
    */
   export const cellMetaDefines = Object.entries(CellMetaChannel)
-    .map(([name, offset]) => `#define CELL_META_${name.toUpperCase()} ${offset}\n`)
+    .map(([name, offset]) => {
+      const screamingSnakeName = name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+      return `#define CELL_META_${screamingSnakeName} ${offset}\n`;
+    })
     .join("");
 
+  const fallDefines = `#define VOID_FALL_DISTANCE ${VOID_FALL_DISTANCE.toFixed(1)}\n`;
+
+  export const vertexShader = cellMetaDefines + fallDefines + _vertexShader;
+  export const ribbonVertexShader = cellMetaDefines + fallDefines + _ribbonVertexShader;
   export const fragmentShader =
     `#define MAX_PULSES ${MAX_PULSES}\n` + cellMetaDefines + _fragmentShader;
   export const ribbonFragmentShader = cellMetaDefines + _ribbonFragmentShader;
@@ -28,8 +41,7 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import vertexShader from "./vertex.glsl?raw";
-  import ribbonVertexShader from "./ribbon.vertex.glsl?raw";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { Pulse } from "wasm-pkg";
   import type { GameState, MapCell } from "wasm-pkg";
   import { T, useThrelte } from "@threlte/core";
@@ -66,10 +78,24 @@
     let rafId = 0;
     const tick = () => {
       const now = performance.now();
-      // Stay idle unless a pulse is animating.
-      const hasActive = $pulses.some((p) => now - p.createdAtMs < Math.max(1, p.durationMs));
-      if (hasActive) {
+      const hasActivePulses = $pulses.some((p) => now - p.createdAtMs < Math.max(1, p.durationMs));
+      const hasFallingCells = fallStart.size > 0;
+      if (hasActivePulses || hasFallingCells) {
         nowMs = now;
+
+        if (hasFallingCells) {
+          const meta = cellMeta;
+          for (const [cellIndex, startMs] of fallStart) {
+            const progress = Math.min(1, (now - startMs) / VOID_FALL_DURATION_MS);
+            meta.setFallProgress(cellIndex, progress);
+            if (progress >= 1) {
+              fallStart.delete(cellIndex);
+              fellCells.add(cellIndex);
+            }
+          }
+          meta.flush();
+        }
+
         // Invalidate when remote state changes to draw a new frame.
         invalidate();
       }
@@ -211,6 +237,16 @@
       this.data[cellIndex * 4 + CellMetaChannel.Void] = value ? 255 : 0;
     }
 
+    /**
+     * Write the falling progress for an explored void cell.
+     *
+     * @param progress - Normalized fall progress in `[0, 1]`.
+     */
+    setFallProgress(cellIndex: number, progress: number): void {
+      const byte = Math.max(0, Math.min(255, Math.round(progress * 255)));
+      this.data[cellIndex * 4 + CellMetaChannel.FallProgress] = byte;
+    }
+
     /** Mark the texture dirty so Three.js re-uploads it on the next frame. */
     flush(): void {
       this.texture.needsUpdate = true;
@@ -248,6 +284,15 @@
   );
   const cellMeta = $derived(new CellMetaTexture($cells.length));
 
+  let fallStart = new SvelteMap<number, number>();
+  let fellCells = new SvelteSet<number>();
+  $effect(() => {
+    // Reset every time a fresh metadata texture is built.
+    void cellMeta;
+    fallStart = new SvelteMap<number, number>();
+    fellCells = new SvelteSet<number>();
+  });
+
   // Dispose old GPU buffers when geometry / metadata texture is rebuilt.
   $effect(() => {
     const layers = [terrain, ribbonBase, ribbonHighlight];
@@ -263,6 +308,7 @@
       vertexShader,
       fragmentShader,
       side: DoubleSide,
+      transparent: true,
       uniforms: {
         elevationMin: { value: gameState.elevationMin },
         elevationMax: { value: gameState.elevationMax },
@@ -287,6 +333,7 @@
       vertexShader: ribbonVertexShader,
       fragmentShader: ribbonFragmentShader,
       side: DoubleSide,
+      transparent: true,
       uniforms: {
         uColor: { value: new Color("#08090c") },
         uCellMeta: { value: cellMeta.texture },
@@ -300,6 +347,7 @@
       vertexShader: ribbonVertexShader,
       fragmentShader: ribbonFragmentShader,
       side: DoubleSide,
+      transparent: true,
       uniforms: {
         uColor: { value: new Color("#f4fbff") },
         uCellMeta: { value: cellMeta.texture },
@@ -326,9 +374,15 @@
     if (!$cellMetadata) return;
 
     const meta = cellMeta;
+    const now = performance.now();
     for (let i = 0; i < $cellMetadata.length; i++) {
-      meta.setExplored(i, $cellMetadata[i].isExplored);
-      meta.setVoid(i, $cellMetadata[i].isVoid);
+      const entry = $cellMetadata[i];
+      meta.setExplored(i, entry.isExplored);
+      meta.setVoid(i, entry.isVoid);
+      // Initiate the fall animation the first time we see a void cell as explored. `fellCells` records cells that have already completed their fall so subsequent re-runs of this effect (e.g. unrelated metadata changes) don't restart the animation.
+      if (entry.isExplored && entry.isVoid && !fallStart.has(i) && !fellCells.has(i)) {
+        fallStart.set(i, now);
+      }
     }
     meta.flush();
     invalidate();

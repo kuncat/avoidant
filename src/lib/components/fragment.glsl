@@ -1,6 +1,7 @@
 varying vec3 vWorldPosition;
 varying float vHeight;
 varying float vCellIndex;
+varying float vFallProgress;
 
 uniform float elevationMin;
 uniform float elevationMax;
@@ -25,12 +26,9 @@ void main() {
   vec4 meta = texture2D(uCellMeta, metaUv);
   float isVoid = meta[CELL_META_VOID];
   float isExplored = meta[CELL_META_EXPLORED];
-  // Void cells are hidden (look like any other cell) until they're explored;
-  // once clicked they reveal themselves as solid black.
-  if (isVoid > 0.5 && isExplored > 0.5) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-    return;
-  }
+  // Once an explored void cell has fully fallen, drop every fragment so the
+  // page background shows through the hole it leaves behind.
+  if (isVoid > 0.5 && isExplored > 0.5 && vFallProgress >= 0.999) discard;
 
   float elevation = remapClamped(vHeight, elevationMin, elevationMax, 0.0, 1.0);
 
@@ -89,5 +87,12 @@ void main() {
   vec3 pulseTint = mix(localPulseTint, remotePulseTint, remoteFactor);
   vec3 finalColor = mix(terrainColor, pulseTint, totalRing * 0.85);
 
-  gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), 1.0);
+  // Fade alpha while an explored void cell is falling. Non-void / unexplored
+  // cells keep alpha = 1.0 so the transparent material draws them opaquely.
+  float alpha = 1.0;
+  if (isVoid > 0.5 && isExplored > 0.5) {
+    alpha = clamp(1.0 - vFallProgress, 0.0, 1.0);
+  }
+
+  gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), alpha);
 }

@@ -3,10 +3,10 @@ uniform sampler2D uCellMeta;
 uniform float uCellMetaSize;
 
 varying float vCellIndex;
+varying float vFallProgress;
 
 void main() {
-  // Ribbons currently render uniformly regardless of per-cell metadata. The
-  // `uCellMeta` uniforms are still bound by the host material so the shader
-  // can re-introduce per-cell logic without churning the JS side.
-  gl_FragColor = vec4(uColor, 1.0);
+  // Ribbons fall with their cell (see ribbon.vertex.glsl) and fade with it here.
+  if (vFallProgress >= 0.999) discard;
+  gl_FragColor = vec4(uColor, clamp(1.0 - vFallProgress, 0.0, 1.0));
 }
