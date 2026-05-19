@@ -20,10 +20,15 @@
   let setupMode: "host" | "join" | undefined = $state(undefined);
   let sizePreset = $state<SizePreset>("medium");
   let ticketInput = $state("");
+  let joinError: string | undefined = $state(undefined);
   let inviteTicket = $state("");
+  let inviteUrl = $derived(
+    inviteTicket && typeof window !== "undefined"
+      ? `${window.location.origin}${window.location.pathname}?ticket=${encodeURIComponent(inviteTicket)}`
+      : "",
+  );
   let isGeneratingInvite = $state(false);
   let networkSnapshot = $derived(gameState?.networkSnapshot);
-
   let connectedPeerCount = $derived(
     ($networkSnapshot?.peers ?? []).filter((peer) => peer.isConnected).length,
   );
@@ -36,6 +41,15 @@
         status = "Loading...";
         await init();
         status = undefined;
+
+        const sharedTicket = new URLSearchParams(window.location.search).get("ticket");
+        if (sharedTicket) {
+          // Clear the ticket from the visible URL so a refresh doesn't re-trigger join.
+          window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash}`);
+          ticketInput = sharedTicket;
+          setupMode = "join";
+          await joinGame();
+        }
       } catch (error) {
         status = "Failed to initialize wasm.";
         console.error("Failed to initialize wasm", error);
@@ -112,22 +126,69 @@
     }
   }
 
+  function extractTicket(input: string): string {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return "";
+    }
+    if (/^https?:\/\//i.test(trimmed)) {
+      try {
+        return new URL(trimmed).searchParams.get("ticket")?.trim() ?? "";
+      } catch {
+        return "";
+      }
+    }
+    return trimmed;
+  }
+
   async function joinGame() {
+    joinError = undefined;
+    let succeeded = false;
     try {
       status = "Joining game...";
-      const options = GameState.optionsFromTicket(ticketInput);
-      gameState = new GameState(options);
+      const ticket = extractTicket(ticketInput);
+      if (!ticket) {
+        throw new Error("Enter a ticket or invitation URL to join a game.");
+      }
+      let options: GameOptions;
+      try {
+        options = GameState.optionsFromTicket(ticket);
+      } catch (error) {
+        console.error("Failed to parse ticket", error);
+        throw new Error("That invitation link or ticket is not valid.", { cause: error });
+      }
+      const nextGameState = new GameState(options);
       status = "Generating map...";
-      gameState.applyMapCells(await generateMap(options));
+      nextGameState.applyMapCells(await generateMap(options));
       status = "Joining game...";
-      await gameState.joinAsPeer(ticketInput, playerNameInput);
+      try {
+        await nextGameState.joinAsPeer(ticket, playerNameInput);
+      } catch (error) {
+        console.error("Failed to join peer", error);
+        try {
+          nextGameState.free();
+        } catch (freeError) {
+          console.error("Failed to release game state", freeError);
+        }
+        throw new Error(
+          "Could not connect to the game. The invitation may have expired or the host may be offline.",
+          { cause: error },
+        );
+      }
+      gameState = nextGameState;
       inviteTicket = "";
+      succeeded = true;
     } catch (error) {
       console.error("Failed to join game", error);
+      joinError = error instanceof Error ? error.message : "Failed to join the game.";
     } finally {
-      setupMode = undefined;
-      ticketInput = "";
       status = undefined;
+      if (succeeded) {
+        setupMode = undefined;
+        ticketInput = "";
+      } else {
+        setupMode = "join";
+      }
     }
   }
 
@@ -141,17 +202,18 @@
     setupMode = undefined;
     inviteTicket = "";
     ticketInput = "";
+    joinError = undefined;
     status = undefined;
   }
 
   async function copyInviteTicket() {
-    if (!inviteTicket) {
+    if (!inviteUrl) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(inviteTicket);
+      await navigator.clipboard.writeText(inviteUrl);
     } catch (error) {
-      console.error("Failed to copy invitation ticket", error);
+      console.error("Failed to copy invitation URL", error);
     }
   }
 
@@ -350,12 +412,30 @@
               <input class="field" id="join-player-name" type="text" bind:value={playerNameInput} />
             </div>
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label class="field-label" for="grid-first-name">Ticket</label>
-              <input class="field" id="grid-first-name" type="text" bind:value={ticketInput} />
+              <label class="field-label" for="grid-first-name">Ticket or Invitation URL</label>
+              <input
+                class="field"
+                id="grid-first-name"
+                type="text"
+                bind:value={ticketInput}
+                oninput={() => (joinError = undefined)}
+              />
             </div>
+            {#if joinError}
+              <div class="w-full px-3" transition:slide={{ duration: 150 }}>
+                <p class="join-error" role="alert">{joinError}</p>
+              </div>
+            {/if}
           </div>
           <div class="flex flex-wrap justify-center gap-2">
-            <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
+            <button
+              class="btn btn-secondary"
+              type="button"
+              onclick={() => {
+                setupMode = undefined;
+                joinError = undefined;
+              }}
+            >
               Back
             </button>
             <button class="btn btn-primary" type="submit">Join</button>
@@ -374,7 +454,7 @@
     {:else if inviteTicket}
       <div class="mt-3" transition:slide={{ duration: 200 }}>
         <div class="mb-2 flex items-center justify-between gap-2">
-          <label class="field-label mb-0" for="invite-ticket">Invitation Ticket</label>
+          <label class="field-label mb-0" for="invite-ticket">Invitation URL</label>
           <button
             class="icon-btn"
             type="button"
@@ -390,7 +470,7 @@
             class="field mb-0 flex-1"
             type="text"
             readonly
-            value={inviteTicket}
+            value={inviteUrl}
           />
           <button class="btn btn-secondary" type="button" onclick={copyInviteTicket}> Copy </button>
         </div>
@@ -423,6 +503,10 @@
 
   h1 {
     @apply m-0;
+  }
+
+  .join-error {
+    @apply rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700;
   }
 
   .panel-wrapper {
