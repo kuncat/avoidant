@@ -187,10 +187,23 @@ impl GameState {
         let output_cells = Array::new();
         let output_metadata = Array::new();
         for (index, cell) in cells.into_iter().enumerate() {
+            let void_neighbor_count = if void_mask[index] {
+                0
+            } else {
+                cell.neighbors()
+                    .iter()
+                    .filter(|n| {
+                        let idx = **n as usize;
+                        idx < cell_count && void_mask[idx]
+                    })
+                    .count()
+                    .min(u8::MAX as usize) as u8
+            };
+
             let map_cell = serde_wasm_bindgen::to_value(&cell)?;
             output_cells.push(&map_cell);
 
-            let metadata = CellMetadataEntry::new(false, void_mask[index]);
+            let metadata = CellMetadataEntry::new(false, void_mask[index], void_neighbor_count);
             let metadata_value = serde_wasm_bindgen::to_value(&metadata)?;
             output_metadata.push(&metadata_value);
         }

@@ -28,14 +28,61 @@ pub(crate) fn generate_map_cells(
     };
 
     let cells = diagram.cells();
+
+    // Compute Voronoi cell neighbors using the d3-delaunay rule: two cells are neighbors iff their clipped polygons share a directed edge (cell `i` has edge a -> b and cell `j` has the reverse edge b -> a). Two sites that are Delaunay-adjacent but whose shared Voronoi edge is fully clipped by the viewport (a common case for hull sites) are correctly excluded.
+    //
+    // [`edge_owner`] maps quantized directed edges to owning cells, and is used to look up each edge's reverse to discover the neighbor across it. Quantization tolerates the tiny floating point differences voronator can produce when emitting the same shared vertex from two different cell clip operations.
+    let quant = |v: f64| -> i64 { (v * 1e9).round() as i64 };
+    type EdgeKey = ((i64, i64), (i64, i64));
+    let mut edge_owner: std::collections::HashMap<EdgeKey, u32> = std::collections::HashMap::new();
+    let quantized_cells: Vec<Vec<(i64, i64)>> = cells
+        .iter()
+        .map(|polygon| {
+            polygon
+                .points()
+                .iter()
+                .map(|p| (quant(p.x), quant(p.y)))
+                .collect()
+        })
+        .collect();
+    for (i, poly) in quantized_cells.iter().enumerate() {
+        let n = poly.len();
+        if n < 2 {
+            continue;
+        }
+        for k in 0..n {
+            let a = poly[k];
+            let b = poly[(k + 1) % n];
+            edge_owner.insert((a, b), i as u32);
+        }
+    }
+    let mut neighbors: Vec<Vec<u32>> = vec![Vec::new(); quantized_cells.len()];
+    for (i, poly) in quantized_cells.iter().enumerate() {
+        let n = poly.len();
+        if n < 2 {
+            continue;
+        }
+        for k in 0..n {
+            let a = poly[k];
+            let b = poly[(k + 1) % n];
+            if let Some(&j) = edge_owner.get(&(b, a)) {
+                let j_usize = j as usize;
+                if j_usize != i && !neighbors[i].contains(&j) {
+                    neighbors[i].push(j);
+                }
+            }
+        }
+    }
+
     let mut output_cells = Vec::with_capacity(cells.len());
-    for polygon in cells {
+    for (cell_index, polygon) in cells.iter().enumerate() {
         let mut vertices = Vec::with_capacity(polygon.points().len());
         for point in polygon.points() {
             let height = vertex_height(point.x, point.y, rng_seed, spikiness, elevation_range);
             vertices.push([point.x, point.y, height]);
         }
-        output_cells.push(MapCell::from_vertices(vertices));
+        let cell_neighbors = neighbors.get(cell_index).cloned().unwrap_or_default();
+        output_cells.push(MapCell::new(vertices, cell_neighbors));
     }
 
     Ok(output_cells)

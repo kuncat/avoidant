@@ -35,6 +35,7 @@ import type { Readable } from "svelte/store";
 #[serde(rename_all = "camelCase")]
 pub struct MapCell {
     vertices: Vec<[f64; 3]>,
+    neighbors: Vec<u32>,
 }
 
 #[derive(Serialize, Deserialize, Tsify)]
@@ -43,6 +44,7 @@ pub struct MapCell {
 pub struct CellMetadataEntry {
     is_explored: bool,
     is_void: bool,
+    void_neighbor_count: u8,
 }
 
 #[derive(Clone, Serialize, Deserialize, Tsify)]
@@ -229,16 +231,24 @@ extern "C" {
 }
 
 impl MapCell {
-    pub(crate) fn from_vertices(vertices: Vec<[f64; 3]>) -> MapCell {
-        MapCell { vertices }
+    pub(crate) fn new(vertices: Vec<[f64; 3]>, neighbors: Vec<u32>) -> MapCell {
+        MapCell {
+            vertices,
+            neighbors,
+        }
+    }
+
+    pub(crate) fn neighbors(&self) -> &[u32] {
+        &self.neighbors
     }
 }
 
 impl CellMetadataEntry {
-    pub(crate) fn new(is_explored: bool, is_void: bool) -> Self {
+    pub(crate) fn new(is_explored: bool, is_void: bool, void_neighbor_count: u8) -> Self {
         Self {
             is_explored,
             is_void,
+            void_neighbor_count,
         }
     }
 

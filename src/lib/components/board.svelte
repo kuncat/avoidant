@@ -45,7 +45,7 @@
   import { Pulse } from "wasm-pkg";
   import type { GameState, MapCell } from "wasm-pkg";
   import { T, useThrelte } from "@threlte/core";
-  import { interactivity } from "@threlte/extras";
+  import { interactivity, Text, Billboard } from "@threlte/extras";
   import {
     BufferAttribute,
     BufferGeometry,
@@ -368,6 +368,40 @@
   let ribbonBaseMesh = $derived(new Mesh(ribbonBase, ribbonBaseMaterial));
   let ribbonHighlightMesh = $derived(new Mesh(ribbonHighlight, ribbonHighlightMaterial));
 
+  // Per-cell centroids (XZ from polygon vertex average, Y from the cell's max vertex height plus a small lift) used to position void-neighbor count labels just above the terrain.
+  const LABEL_LIFT_FACTOR = 0.075;
+  const cellLabelAnchors = $derived(
+    $cells.map((cell) => {
+      const vs = cell.vertices;
+      if (vs.length === 0) return { x: 0, y: 0, z: 0 };
+      let sx = 0;
+      let sz = 0;
+      let maxH = -Infinity;
+      for (const [vx, vy, vh] of vs) {
+        sx += vx;
+        sz += vy;
+        if (vh > maxH) maxH = vh;
+      }
+      return {
+        x: sx / vs.length,
+        y: maxH + cellRadius * LABEL_LIFT_FACTOR,
+        z: sz / vs.length,
+      };
+    }),
+  );
+
+  const LABEL_COLORS = [
+    undefined,
+    "#1d4ed8",
+    "#15803d",
+    "#b91c1c",
+    "#1e3a8a",
+    "#7c2d12",
+    "#0e7490",
+    "#111827",
+    "#374151",
+  ];
+
   // Push cell metadata to the DataTexture used by shaders which sample it using `aCellIndex` so a single byte covers all of a cell's vertices in all three layers.
   $effect(() => {
     if ($cells.length === 0) return;
@@ -429,3 +463,22 @@
 <T is={terrainMesh} onclick={handleTerrainClick} />
 <T is={ribbonBaseMesh} />
 <T is={ribbonHighlightMesh} />
+
+{#each $cellMetadata as entry, i (i)}
+  {#if entry.isExplored && !entry.isVoid && entry.voidNeighborCount > 0}
+    {@const anchor = cellLabelAnchors[i]}
+    {#if anchor}
+      <Billboard position={[anchor.x, anchor.y, anchor.z]}>
+        <Text
+          text={String(entry.voidNeighborCount)}
+          fontSize={cellRadius * 0.7}
+          color={LABEL_COLORS[Math.min(entry.voidNeighborCount, LABEL_COLORS.length - 1)]}
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={cellRadius * 0.04}
+          outlineColor="#f8fafc"
+        />
+      </Billboard>
+    {/if}
+  {/if}
+{/each}

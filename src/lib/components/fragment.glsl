@@ -62,8 +62,8 @@ void main() {
 
   float colorFactor = max(isExplored, mix(isExplored, totalSweep, hasSweep));
 
-  vec3 unexploredLow = vec3(0.102, 0.102, 0.1098);
-  vec3 unexploredHigh = vec3(0.2196, 0.2235, 0.2353);
+  vec3 unexploredLow = vec3(0.2588, 0.2588, 0.2784);
+  vec3 unexploredHigh = vec3(0.4431, 0.451, 0.4706);
   vec3 exploredLow = vec3(0.6588, 0.7098, 0.7922);
   vec3 exploredHigh = vec3(0.6784, 0.7137, 0.7451);
 
