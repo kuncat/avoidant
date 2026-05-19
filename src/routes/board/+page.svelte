@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { slide } from "svelte/transition";
   import init, { GameState, type GameOptions } from "wasm-pkg";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
@@ -12,141 +13,17 @@
   let numCellsInput = $state(160);
   let rngSeedInput = $state(999);
   let playerNameInput = $state("Player");
-  let gameConfig: "host" | "join" | undefined = $state(undefined);
+  let setupMode: "host" | "join" | undefined = $state(undefined);
   let ticketInput = $state("");
   let inviteTicket = $state("");
-  let nowMs = $state(Date.now());
-  let nodeReadyAtMs = $state<number | undefined>(undefined);
+  let isGeneratingInvite = $state(false);
   let networkSnapshot = $derived(gameState?.networkSnapshot);
-  let hasSeenConnectedPeers = $state(false);
 
-  let connectedPeers = $derived(
-    ($networkSnapshot?.peers ?? [])
-      .filter((peer) => peer.isConnected)
-      .sort((left, right) => {
-        const leftName = (left.nickname ?? left.endpointId).toLowerCase();
-        const rightName = (right.nickname ?? right.endpointId).toLowerCase();
-        return leftName.localeCompare(rightName);
-      }),
+  let connectedPeerCount = $derived(
+    ($networkSnapshot?.peers ?? []).filter((peer) => peer.isConnected).length,
   );
-
-  let connectionDroppedWarning = $derived(
-    $networkSnapshot?.hasNode &&
-      $networkSnapshot?.listenerStarted &&
-      hasSeenConnectedPeers &&
-      connectedPeers.length === 0,
-  );
-
-  let connectionSummary = $derived.by(() => {
-    if (!gameState) {
-      return "No active game session.";
-    }
-
-    if (!$networkSnapshot?.hasNode) {
-      return "Not connected yet. Host must create/invite, or joiner must join ticket.";
-    }
-
-    if (!$networkSnapshot?.listenerStarted) {
-      return "Network listener is starting...";
-    }
-
-    const peerCount = connectedPeers.length;
-    if (peerCount === 0) {
-      return "Connected to session; waiting for peers.";
-    }
-
-    return `Connected to ${peerCount} peer${peerCount === 1 ? "" : "s"}.`;
-  });
-
-  function shortenEndpointId(endpointId: string): string {
-    if (endpointId.length <= 18) {
-      return endpointId;
-    }
-
-    return `${endpointId.slice(0, 9)}...${endpointId.slice(-9)}`;
-  }
-
-  function formatMutationAge(lastMutationMs: number | undefined, referenceMs: number): string {
-    if (lastMutationMs === undefined) {
-      return "never";
-    }
-
-    const elapsedMs = Math.max(0, referenceMs - lastMutationMs);
-    if (elapsedMs < 1000) {
-      return `${Math.round(elapsedMs)}ms ago`;
-    }
-
-    if (elapsedMs < 10_000) {
-      return `${(elapsedMs / 1000).toFixed(1)}s ago`;
-    }
-
-    if (elapsedMs < 60_000) {
-      return `${Math.round(elapsedMs / 1000)}s ago`;
-    }
-
-    return `${Math.round(elapsedMs / 60_000)}m ago`;
-  }
-
-  function formatDuration(elapsedMs: number): string {
-    if (elapsedMs < 1000) {
-      return `${Math.max(0, Math.round(elapsedMs))}ms`;
-    }
-
-    if (elapsedMs < 60_000) {
-      return `${(elapsedMs / 1000).toFixed(1)}s`;
-    }
-
-    return `${(elapsedMs / 60_000).toFixed(1)}m`;
-  }
-
-  let timeSinceLastInboundMutation = $derived(
-    formatMutationAge($networkSnapshot?.lastInboundMutationMs, nowMs),
-  );
-  let timeSinceLastOutboundMutation = $derived(
-    formatMutationAge($networkSnapshot?.lastOutboundMutationMs, nowMs),
-  );
-  let timeSinceNodeReady = $derived(
-    nodeReadyAtMs === undefined ? "n/a" : formatDuration(nowMs - nodeReadyAtMs),
-  );
-  let snapshotAge = $derived(
-    $networkSnapshot === undefined ? "n/a" : formatDuration(nowMs - $networkSnapshot.sampledAtMs),
-  );
-  let prolongedZeroPeersWarning = $derived(
-    $networkSnapshot?.hasNode &&
-      $networkSnapshot?.listenerStarted &&
-      connectedPeers.length === 0 &&
-      nodeReadyAtMs !== undefined &&
-      nowMs - nodeReadyAtMs > 15_000,
-  );
-  let networkSnapshotStaleWarning = $derived(
-    $networkSnapshot !== undefined && nowMs - $networkSnapshot.sampledAtMs > 10_000,
-  );
-
-  $effect(() => {
-    if (!gameState) {
-      hasSeenConnectedPeers = false;
-      nodeReadyAtMs = undefined;
-      return;
-    }
-
-    if (connectedPeers.length > 0) {
-      hasSeenConnectedPeers = true;
-    }
-
-    if ($networkSnapshot?.hasNode && nodeReadyAtMs === undefined) {
-      nodeReadyAtMs = Date.now();
-    }
-
-    if (!$networkSnapshot?.hasNode) {
-      nodeReadyAtMs = undefined;
-    }
-  });
 
   onMount(() => {
-    const clockIntervalId = window.setInterval(() => {
-      nowMs = Date.now();
-    }, 250);
-
     const initializeWasm = async () => {
       try {
         status = "Loading...";
@@ -159,10 +36,6 @@
     };
 
     void initializeWasm();
-
-    return () => {
-      clearInterval(clockIntervalId);
-    };
   });
 
   async function startGame() {
@@ -181,7 +54,7 @@
     } catch (error) {
       console.error("Failed to start game", error);
     } finally {
-      gameConfig = undefined;
+      setupMode = undefined;
       status = undefined;
     }
   }
@@ -199,26 +72,113 @@
     } catch (error) {
       console.error("Failed to join game", error);
     } finally {
-      gameConfig = undefined;
+      setupMode = undefined;
       ticketInput = "";
       status = undefined;
     }
   }
+
+  function exitGame() {
+    try {
+      gameState?.free();
+    } catch (error) {
+      console.error("Failed to release game state", error);
+    }
+    gameState = undefined;
+    setupMode = undefined;
+    inviteTicket = "";
+    ticketInput = "";
+    status = undefined;
+  }
+
+  async function copyInviteTicket() {
+    if (!inviteTicket) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(inviteTicket);
+    } catch (error) {
+      console.error("Failed to copy invitation ticket", error);
+    }
+  }
+
+  async function generateInvite() {
+    if (isGeneratingInvite) {
+      return;
+    }
+    isGeneratingInvite = true;
+    try {
+      inviteTicket = (await gameState?.invite(playerNameInput)) ?? "";
+      if (inviteTicket) {
+        await copyInviteTicket();
+      }
+    } catch (error) {
+      console.error("Failed to create invitation", error);
+    } finally {
+      isGeneratingInvite = false;
+    }
+  }
 </script>
 
-<details
-  class="fixed top-4 left-4 z-10 max-w-lg rounded border border-gray-400 bg-white p-4"
-  class:opacity-85={gameState}
+<div
+  class="panel-wrapper fixed inset-x-0 z-20 flex justify-center select-none"
+  class:[&_*]:text-white={gameState}
+  class:panel-wrapper-card={!gameState}
+  class:panel-wrapper-header={gameState}
 >
-  <summary><h1>Avoidant</h1></summary>
-  <div>
+  <div
+    class="panel-shell w-full"
+    class:max-w-full={gameState}
+    class:max-w-md={!gameState && setupMode}
+    class:max-w-xs={!gameState && !setupMode}
+    class:panel-card={!gameState}
+    class:panel-header={gameState}
+    class:py-6={!gameState && setupMode}
+    class:py-12={!gameState && !setupMode}
+  >
+    <div class="flex flex-wrap items-center gap-3" class:justify-center={!gameState}>
+      <h1
+        class="panel-title font-semibold tracking-wide"
+        class:pb-4={!gameState}
+        class:text-5xl={!gameState}
+        class:text-lg={gameState}
+      >
+        Avoidant
+      </h1>
+      {#if gameState}
+        <div class="ml-auto text-sm text-slate-600">
+          {#if connectedPeerCount > 0}
+            Players: <strong class="text-slate-800">{connectedPeerCount + 1}</strong>
+          {/if}
+        </div>
+        <div class="flex gap-2">
+          <button
+            class="btn btn-primary"
+            type="button"
+            onclick={generateInvite}
+            disabled={isGeneratingInvite}
+          >
+            {#if isGeneratingInvite}
+              <span class="spinner" aria-hidden="true"></span>
+              <span>Preparing…</span>
+            {:else}
+              Invite
+            {/if}
+          </button>
+          <button class="btn btn-danger" type="button" onclick={exitGame}>Exit</button>
+        </div>
+      {/if}
+    </div>
+
     {#if status}
-      <p>{status}</p>
+      <p class="mt-2 text-sm text-slate-600">{status}</p>
     {/if}
+
     {#if !gameState}
-      {#if gameConfig === "host"}
+      {#if setupMode === "host"}
         <form
-          class="w-full max-w-lg"
+          class="mt-4 w-full"
+          transition:slide={{ duration: 150 }}
           onsubmit={async (event) => {
             event.preventDefault();
             await startGame();
@@ -226,28 +186,13 @@
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label
-                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-                for="player-name"
-              >
-                Player Name
-              </label>
-              <input
-                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-                id="player-name"
-                type="text"
-                bind:value={playerNameInput}
-              />
+              <label class="field-label" for="player-name">Player Name</label>
+              <input class="field" id="player-name" type="text" bind:value={playerNameInput} />
             </div>
             <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-              <label
-                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-                for="grid-first-name"
-              >
-                Size
-              </label>
+              <label class="field-label" for="grid-first-name">Size</label>
               <input
-                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+                class="field"
                 id="grid-first-name"
                 type="number"
                 inputmode="numeric"
@@ -258,14 +203,9 @@
               />
             </div>
             <div class="w-full px-3 md:w-1/2">
-              <label
-                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-                for="grid-last-name"
-              >
-                RNG Seed
-              </label>
+              <label class="field-label" for="grid-last-name">RNG Seed</label>
               <input
-                class="block w-full appearance-none rounded border border-gray-200 bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:border-gray-500 focus:bg-white focus:outline-none"
+                class="field"
                 id="grid-last-name"
                 type="number"
                 inputmode="numeric"
@@ -274,18 +214,17 @@
               />
             </div>
           </div>
-          <div class="flex flex-wrap gap-2">
-            <button
-              class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-              type="submit"
-            >
-              Start
+          <div class="flex flex-wrap justify-center gap-2">
+            <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
+              Back
             </button>
+            <button class="btn btn-primary" type="submit">Start</button>
           </div>
         </form>
-      {:else if gameConfig === "join"}
+      {:else if setupMode === "join"}
         <form
-          class="w-full max-w-lg"
+          class="mt-4 w-full"
+          transition:slide={{ duration: 220 }}
           onsubmit={async (event) => {
             event.preventDefault();
             await joinGame();
@@ -293,167 +232,61 @@
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label
-                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-                for="join-player-name"
-              >
-                Player Name
-              </label>
-              <input
-                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-                id="join-player-name"
-                type="text"
-                bind:value={playerNameInput}
-              />
+              <label class="field-label" for="join-player-name">Player Name</label>
+              <input class="field" id="join-player-name" type="text" bind:value={playerNameInput} />
             </div>
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label
-                class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-                for="grid-first-name"
-              >
-                Ticket
-              </label>
-              <input
-                class="mb-3 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
-                id="grid-first-name"
-                type="text"
-                bind:value={ticketInput}
-              />
+              <label class="field-label" for="grid-first-name">Ticket</label>
+              <input class="field" id="grid-first-name" type="text" bind:value={ticketInput} />
             </div>
           </div>
-          <div class="flex flex-wrap gap-2">
-            <button
-              class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-              type="submit"
-            >
-              Join
+          <div class="flex flex-wrap justify-center gap-2">
+            <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
+              Back
             </button>
+            <button class="btn btn-primary" type="submit">Join</button>
           </div>
         </form>
       {:else}
-        <button
-          class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-          type="button"
-          onclick={() => (gameConfig = "host")}
-        >
-          New Game
-        </button>
-        <button
-          class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-          type="button"
-          onclick={() => (gameConfig = "join")}
-        >
-          Join Game
-        </button>
+        <div class="mt-4 flex flex-wrap justify-center gap-2" transition:slide={{ duration: 220 }}>
+          <button class="btn btn-primary" type="button" onclick={() => (setupMode = "host")}>
+            New Game
+          </button>
+          <button class="btn btn-primary" type="button" onclick={() => (setupMode = "join")}>
+            Join Game
+          </button>
+        </div>
       {/if}
-    {:else}
-      <button
-        class="rounded border-4 border-teal-500 bg-teal-500 px-2 py-1 text-sm text-white hover:border-teal-700 hover:bg-teal-700"
-        type="button"
-        onclick={async () => {
-          try {
-            inviteTicket = (await gameState?.invite(playerNameInput)) ?? "";
-          } catch (error) {
-            console.error("Failed to create invitation", error);
-          }
-        }}
-      >
-        Invite Player
-      </button>
-
-      {#if inviteTicket}
-        <div class="mt-3">
-          <label
-            class="mb-2 block text-xs font-bold tracking-wide text-gray-700 uppercase"
-            for="invite-ticket"
+    {:else if inviteTicket}
+      <div class="mt-3" transition:slide={{ duration: 200 }}>
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <label class="field-label mb-0" for="invite-ticket">Invitation Ticket</label>
+          <button
+            class="icon-btn"
+            type="button"
+            aria-label="Close invitation"
+            onclick={() => (inviteTicket = "")}
           >
-            Invitation Ticket
-          </label>
+            ×
+          </button>
+        </div>
+        <div class="flex items-stretch gap-2">
           <input
             id="invite-ticket"
-            class="mb-2 block w-full appearance-none rounded border bg-gray-200 px-4 py-3 leading-tight text-gray-700 focus:bg-white focus:outline-none"
+            class="field mb-0 flex-1"
             type="text"
             readonly
             value={inviteTicket}
           />
+          <button class="btn btn-secondary" type="button" onclick={copyInviteTicket}> Copy </button>
         </div>
-      {/if}
-
-      <div class="mt-3 rounded border border-slate-300 bg-slate-50 p-3 text-xs text-slate-700">
-        <p class="font-semibold uppercase">Network Status</p>
-        <p class="mt-1">{connectionSummary}</p>
-        {#if $networkSnapshot}
-          <p class="mt-1">
-            Last Update: {new Date($networkSnapshot?.sampledAtMs).toLocaleTimeString()}
-          </p>
-        {/if}
-        <p class="mt-1">Listener: {$networkSnapshot?.listenerStarted ? "active" : "inactive"}</p>
-        <p class="mt-1">Session Topic: {$networkSnapshot?.topicId ?? "n/a"}</p>
-        <p class="mt-1">
-          Local Endpoint: {$networkSnapshot?.endpointId
-            ? shortenEndpointId($networkSnapshot.endpointId)
-            : "n/a"}
-        </p>
-        <p class="mt-1">Connected Peers: {connectedPeers.length}</p>
-        <p class="mt-1">Time Since Node Ready: {timeSinceNodeReady}</p>
-        <p class="mt-1">Snapshot Age: {snapshotAge}</p>
-        <p class="mt-1">
-          Last Outbound Mutation: {timeSinceLastOutboundMutation}
-        </p>
-        <p class="mt-1">
-          Last Inbound Mutation: {timeSinceLastInboundMutation}
-        </p>
-
-        {#if connectionDroppedWarning}
-          <p
-            class="mt-2 rounded border border-amber-300 bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-800"
-          >
-            Peer connectivity dropped to zero after being connected. Relay/session might be
-            unstable.
-          </p>
-        {/if}
-
-        {#if prolongedZeroPeersWarning}
-          <div
-            class="mt-2 rounded border border-rose-300 bg-rose-100 px-2 py-2 text-[11px] text-rose-900"
-          >
-            <p class="font-semibold">Connectivity Stall Detected</p>
-            <p class="mt-1">
-              No peers connected for {timeSinceNodeReady} after node startup.
-            </p>
-            <p class="mt-1">
-              Bootstrap retries are running, but relay discovery/dialing may still be failing.
-            </p>
-          </div>
-        {/if}
-
-        {#if networkSnapshotStaleWarning}
-          <p
-            class="mt-2 rounded border border-orange-300 bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-900"
-          >
-            No new network events for {snapshotAge}. Connection state may be stale.
-          </p>
-        {/if}
-
-        {#if connectedPeers.length > 0}
-          <ul
-            class="mt-2 max-h-28 overflow-auto rounded border border-slate-200 bg-white p-2 font-mono text-[11px]"
-          >
-            {#each connectedPeers as peer (peer.endpointId)}
-              <li class="mb-1 last:mb-0" title={peer.endpointId}>
-                <span class="font-semibold">{peer.nickname ?? "Unknown Player"}</span>
-                <span class="text-slate-500"> ({shortenEndpointId(peer.endpointId)})</span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
       </div>
     {/if}
   </div>
-</details>
+</div>
 
 {#if gameState}
-  <div class="h-screen w-full p-2">
+  <div class="h-screen w-full">
     <Canvas colorSpace="srgb-linear">
       <T.OrthographicCamera makeDefault zoom={7} near={0.1} far={1000} position={[50, 180, 180]} />
       <Board bind:gameState />
@@ -470,3 +303,79 @@
     </Canvas>
   </div>
 {/if}
+
+<style>
+  @reference "../layout.css";
+
+  h1 {
+    @apply m-0;
+  }
+
+  .panel-wrapper {
+    @apply transition-all duration-500 ease-out;
+  }
+
+  .panel-wrapper-card {
+    @apply top-1/2 -translate-y-1/2;
+  }
+
+  .panel-wrapper-header {
+    @apply top-0 translate-y-0;
+  }
+
+  .panel-shell {
+    @apply border border-slate-300/50 shadow-lg backdrop-blur transition-all duration-500 ease-out;
+  }
+
+  .panel-card {
+    @apply rounded bg-slate-300 px-6 text-center shadow-xl;
+  }
+
+  .panel-header {
+    @apply rounded-none border-x-0 border-t-0 bg-slate-900/75 p-2 text-left;
+
+    button {
+      @apply h-6;
+    }
+
+    .field {
+      @apply mb-0 h-6 border-slate-600 bg-slate-700 px-2 py-0 text-sm text-slate-100 placeholder:text-slate-400 focus:bg-slate-600;
+    }
+  }
+
+  .panel-title {
+    @apply transition-all duration-500 ease-out;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center rounded border px-2 py-1 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-70;
+  }
+
+  .btn-primary {
+    @apply border-sky-700/25 bg-sky-600 text-white/90 hover:border-sky-800 hover:text-white focus-visible:ring-sky-800;
+  }
+
+  .btn-secondary {
+    @apply border-slate-300/25 bg-slate-200 text-slate-700/90 hover:border-slate-400 hover:text-slate-700 focus-visible:ring-slate-400;
+  }
+
+  .btn-danger {
+    @apply border-rose-600/25 bg-rose-500 text-white/90 hover:border-rose-700 hover:text-white focus-visible:ring-rose-700;
+  }
+
+  .field {
+    @apply mb-3 block w-full appearance-none rounded border border-gray-200 bg-gray-200 px-4 py-3 text-left leading-tight text-gray-700 focus:border-gray-500 focus:bg-white focus:outline-none;
+  }
+
+  .field-label {
+    @apply mb-2 block text-left text-xs font-bold tracking-wide text-slate-500 uppercase;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-6 w-6 items-center justify-center rounded text-lg leading-none text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400;
+  }
+
+  .spinner {
+    @apply mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white;
+  }
+</style>
