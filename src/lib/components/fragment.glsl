@@ -26,8 +26,7 @@ void main() {
   vec4 meta = texture2D(uCellMeta, metaUv);
   float isVoid = meta[CELL_META_VOID];
   float isExplored = meta[CELL_META_EXPLORED];
-  // Once an explored void cell has fully fallen, drop every fragment so the
-  // page background shows through the hole it leaves behind.
+  // Once an explored void cell has fully fallen, drop every fragment.
   if (isVoid > 0.5 && isExplored > 0.5 && vFallProgress >= 0.999) discard;
 
   float elevation = remapClamped(vHeight, elevationMin, elevationMax, 0.0, 1.0);
@@ -63,13 +62,13 @@ void main() {
 
   float colorFactor = max(isExplored, mix(isExplored, totalSweep, hasSweep));
 
-  vec3 unexploredLow = vec3(0.22, 0.23, 0.26);
-  vec3 unexploredHigh = vec3(0.28, 0.29, 0.32);
+  vec3 unexploredLow = vec3(0.102, 0.102, 0.1098);
+  vec3 unexploredHigh = vec3(0.2196, 0.2235, 0.2353);
   vec3 exploredLow = vec3(0.6588, 0.7098, 0.7922);
   vec3 exploredHigh = vec3(0.6784, 0.7137, 0.7451);
 
-  vec3 lowColor = mix(unexploredLow, exploredLow, 1.0 - colorFactor);
-  vec3 highColor = mix(unexploredHigh, exploredHigh, 1.0 - colorFactor);
+  vec3 lowColor = mix(unexploredLow, exploredLow, colorFactor);
+  vec3 highColor = mix(unexploredHigh, exploredHigh, colorFactor);
   vec3 terrainColor = mix(lowColor, highColor, elevation);
 
   // Flat-shaded hillshading: derive per-face normal from screen-space derivatives
