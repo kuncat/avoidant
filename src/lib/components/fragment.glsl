@@ -79,7 +79,8 @@ void main() {
 
   vec3 localPulseTint = vec3(0.55, 0.95, 1.0);
   vec3 remotePulseTint = vec3(1.0, 0.42, 0.38);
-  float remoteFactor = step(0.0001, totalRing) * clamp(remoteRing / (totalRing + 0.00001), 0.0, 1.0);
+  float remoteFactor =
+    step(0.0001, totalRing) * clamp(remoteRing / (totalRing + 0.00001), 0.0, 1.0);
   vec3 pulseTint = mix(localPulseTint, remotePulseTint, remoteFactor);
   vec3 finalColor = mix(terrainColor, pulseTint, totalRing * 0.85);
 

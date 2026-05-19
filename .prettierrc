@@ -5,9 +5,15 @@
       "options": {
         "parser": "svelte"
       }
+    },
+    {
+      "files": "*.glsl",
+      "options": {
+        "parser": "glsl-parser"
+      }
     }
   ],
-  "plugins": ["prettier-plugin-svelte", "prettier-plugin-tailwindcss"],
+  "plugins": ["prettier-plugin-svelte", "prettier-plugin-tailwindcss", "prettier-plugin-glsl"],
   "printWidth": 100,
   "singleQuote": false,
   "tailwindStylesheet": "./src/routes/layout.css",
