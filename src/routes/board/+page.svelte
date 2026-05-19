@@ -8,12 +8,17 @@
   import Board from "$lib/components/board.svelte";
   import { generateMap } from "$lib/workers/mapgen-client";
 
+  const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
+  const SIZE_PRESETS = { small: 80, medium: 160, large: 320 } as const;
+  type SizePreset = keyof typeof SIZE_PRESETS | "custom";
+
   let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
-  let numCellsInput = $state(160);
-  let rngSeedInput = $state(999);
-  let playerNameInput = $state("Player");
+  let numCellsInput = $state(SIZE_PRESETS.medium);
+  let rngSeedInput = $state(0);
+  let playerNameInput = $state(localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "Player");
   let setupMode: "host" | "join" | undefined = $state(undefined);
+  let sizePreset = $state<SizePreset>("medium");
   let ticketInput = $state("");
   let inviteTicket = $state("");
   let isGeneratingInvite = $state(false);
@@ -24,6 +29,8 @@
   );
 
   onMount(() => {
+    rngSeedInput = Math.floor(Date.now() / 1000);
+
     const initializeWasm = async () => {
       try {
         status = "Loading...";
@@ -38,12 +45,58 @@
     void initializeWasm();
   });
 
+  $effect(() => {
+    try {
+      localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerNameInput);
+    } catch (error) {
+      console.warn("Failed to persist player name", error);
+    }
+  });
+
+  function hexCells(radius: number): string[] {
+    const cells: string[] = [];
+    const dx = radius * Math.sqrt(3);
+    const dy = radius * 1.5;
+    const size = 40;
+    for (let row = 0; ; row++) {
+      const cy = row * dy + radius;
+      if (cy - radius > size) break;
+      const xOffset = (row % 2) * (dx / 2);
+      for (let col = 0; ; col++) {
+        const cx = col * dx + xOffset + dx / 2;
+        if (cx - dx / 2 > size) break;
+        cells.push(
+          [
+            [cx, cy - radius],
+            [cx + dx / 2, cy - radius / 2],
+            [cx + dx / 2, cy + radius / 2],
+            [cx, cy + radius],
+            [cx - dx / 2, cy + radius / 2],
+            [cx - dx / 2, cy - radius / 2],
+          ]
+            .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
+            .join(" "),
+        );
+      }
+    }
+    return cells;
+  }
+
+  const presetIcons: { value: SizePreset; label: string; cells: string[] | null }[] = [
+    { value: "small", label: "Small", cells: hexCells(11) },
+    { value: "medium", label: "Medium", cells: hexCells(7) },
+    { value: "large", label: "Large", cells: hexCells(4.5) },
+    { value: "custom", label: "Custom", cells: null },
+  ];
+
   async function startGame() {
     try {
+      const resolvedNumCells =
+        sizePreset === "custom" ? $state.snapshot(numCellsInput) : SIZE_PRESETS[sizePreset];
       const options: GameOptions = {
         elevationMax: 6.0,
         elevationMin: 0.0,
-        numCells: $state.snapshot(numCellsInput),
+        numCells: resolvedNumCells,
         rngSeed: $state.snapshot(rngSeedInput),
         spikiness: 0.8,
       };
@@ -185,34 +238,95 @@
           }}
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
-            <div class="mb-6 w-full px-3 md:mb-0">
+            <div class="mb-4 w-full px-3">
               <label class="field-label" for="player-name">Player Name</label>
               <input class="field" id="player-name" type="text" bind:value={playerNameInput} />
             </div>
-            <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-              <label class="field-label" for="grid-first-name">Size</label>
-              <input
-                class="field"
-                id="grid-first-name"
-                type="number"
-                inputmode="numeric"
-                bind:value={numCellsInput}
-                min="100"
-                max="4096"
-                step="1"
-              />
+            <div class="mb-4 w-full px-3">
+              <span class="field-label">Map Size</span>
+              <div class="grid grid-cols-4 gap-2">
+                {#each presetIcons as preset (preset.value)}
+                  <button
+                    type="button"
+                    class="preset-btn"
+                    class:preset-btn-active={sizePreset === preset.value}
+                    aria-pressed={sizePreset === preset.value}
+                    onclick={() => (sizePreset = preset.value)}
+                  >
+                    <span class="preset-icon">
+                      {#if preset.cells}
+                        <svg
+                          viewBox="0 0 40 40"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          {#each preset.cells as points, i (i)}
+                            <polygon {points} />
+                          {/each}
+                        </svg>
+                      {:else}
+                        <svg
+                          viewBox="0 0 40 40"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          aria-hidden="true"
+                        >
+                          <line x1="8" y1="12" x2="32" y2="12" />
+                          <circle cx="15" cy="12" r="3.5" fill="currentColor" />
+                          <line x1="8" y1="20" x2="32" y2="20" />
+                          <circle cx="25" cy="20" r="3.5" fill="currentColor" />
+                          <line x1="8" y1="28" x2="32" y2="28" />
+                          <circle cx="19" cy="28" r="3.5" fill="currentColor" />
+                        </svg>
+                      {/if}
+                    </span>
+                    <span class="preset-label">{preset.label}</span>
+                    <span class="preset-count">
+                      {preset.value === "custom"
+                        ? sizePreset === "custom"
+                          ? `${numCellsInput} cells`
+                          : ""
+                        : `${SIZE_PRESETS[preset.value]} cells`}
+                    </span>
+                  </button>
+                {/each}
+              </div>
             </div>
-            <div class="w-full px-3 md:w-1/2">
-              <label class="field-label" for="grid-last-name">RNG Seed</label>
-              <input
-                class="field"
-                id="grid-last-name"
-                type="number"
-                inputmode="numeric"
-                bind:value={rngSeedInput}
-                min="0"
-              />
-            </div>
+            {#if sizePreset === "custom"}
+              <div class="w-full px-3" transition:slide={{ duration: 180 }}>
+                <div class="-mx-3 flex flex-wrap">
+                  <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
+                    <label class="field-label" for="grid-first-name">Size</label>
+                    <input
+                      class="field"
+                      id="grid-first-name"
+                      type="number"
+                      inputmode="numeric"
+                      bind:value={numCellsInput}
+                      min="32"
+                      max="262144"
+                      step="1"
+                    />
+                  </div>
+                  <div class="w-full px-3 md:w-1/2">
+                    <label class="field-label" for="grid-last-name">Seed</label>
+                    <input
+                      class="field"
+                      id="grid-last-name"
+                      type="number"
+                      inputmode="numeric"
+                      bind:value={rngSeedInput}
+                      min="0"
+                    />
+                  </div>
+                </div>
+              </div>
+            {/if}
           </div>
           <div class="flex flex-wrap justify-center gap-2">
             <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
@@ -335,7 +449,7 @@
     @apply rounded-none border-x-0 border-t-0 bg-slate-900/75 p-2 text-left;
 
     button {
-      @apply h-6;
+      @apply h-6 px-2 py-0;
     }
 
     .field {
@@ -348,7 +462,7 @@
   }
 
   .btn {
-    @apply inline-flex items-center justify-center rounded border px-2 py-1 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-70;
+    @apply inline-flex items-center justify-center rounded border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-70;
   }
 
   .btn-primary {
@@ -373,6 +487,38 @@
 
   .icon-btn {
     @apply inline-flex h-6 w-6 items-center justify-center rounded text-lg leading-none text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400;
+  }
+
+  .preset-btn {
+    @apply flex aspect-square w-full flex-col items-center justify-center gap-1 rounded border border-slate-300 bg-slate-100 p-2 text-slate-600 transition-colors hover:border-slate-400 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400;
+  }
+
+  .preset-btn-active {
+    @apply border-sky-500 bg-sky-100 text-sky-800 hover:border-sky-600 hover:bg-sky-100;
+  }
+
+  .preset-icon {
+    @apply block h-8 w-8 text-slate-500;
+  }
+
+  .preset-btn-active .preset-icon {
+    @apply text-sky-600;
+  }
+
+  .preset-icon svg {
+    @apply h-full w-full;
+  }
+
+  .preset-label {
+    @apply text-xs font-semibold tracking-wide uppercase;
+  }
+
+  .preset-count {
+    @apply text-[10px] leading-none text-slate-500;
+  }
+
+  .preset-btn-active .preset-count {
+    @apply text-sky-700;
   }
 
   .spinner {
