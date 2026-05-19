@@ -1,6 +1,9 @@
 use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 use js_sys::{Array, JSON};
+use rand::SeedableRng;
+use rand::seq::SliceRandom;
+use rand_xoshiro::Xoshiro256PlusPlus;
 use svelte_store::Readable;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
@@ -29,6 +32,7 @@ impl GameState {
         let spikiness = options.spikiness.unwrap_or(0.4).clamp(0.0, 1.0);
         let elevation_min = options.elevation_min.unwrap_or(-0.4);
         let elevation_max = options.elevation_max.unwrap_or(0.4);
+        let void_fraction = options.void_fraction.unwrap_or(0.15625).clamp(0.0, 1.0);
         let initial_network_snapshot = NetworkSnapshot::empty();
 
         Ok(GameState {
@@ -53,6 +57,7 @@ impl GameState {
             spikiness,
             elevation_min,
             elevation_max,
+            void_fraction,
             network_node: None,
             network_channel: None,
             network_listener_started: false,
@@ -161,13 +166,16 @@ impl GameState {
     }
 
     fn apply_generated_cells(&mut self, cells: Vec<MapCell>) -> Result<JsValue, JsValue> {
+        let cell_count = cells.len();
+        let void_mask = compute_void_mask(cell_count, self.rng_seed, self.void_fraction);
+
         let output_cells = Array::new();
         let output_metadata = Array::new();
-        for cell in cells {
+        for (index, cell) in cells.into_iter().enumerate() {
             let map_cell = serde_wasm_bindgen::to_value(&cell)?;
             output_cells.push(&map_cell);
 
-            let metadata = CellMetadataEntry::new(false, false);
+            let metadata = CellMetadataEntry::new(false, void_mask[index]);
             let metadata_value = serde_wasm_bindgen::to_value(&metadata)?;
             output_metadata.push(&metadata_value);
         }
@@ -303,4 +311,33 @@ impl GameState {
         self.sync_network_snapshot();
         Ok(())
     }
+}
+
+/// Deterministically choose which cell indices are void.
+///
+/// Builds a permutation of `[0, cell_count)` seeded from `rng_seed` (with a
+/// namespacing constant so the void selection is independent of any other
+/// seed-derived choices) and marks the first `floor(cell_count * fraction)`
+/// indices as void. This guarantees the exact requested fraction and is fully
+/// reproducible across peers that share the same `rng_seed` and `fraction`.
+fn compute_void_mask(cell_count: usize, rng_seed: u64, fraction: f64) -> Vec<bool> {
+    let mut mask = vec![false; cell_count];
+    if cell_count == 0 || fraction <= 0.0 {
+        return mask;
+    }
+
+    let clamped = fraction.clamp(0.0, 1.0);
+    let void_count = ((cell_count as f64) * clamped).floor() as usize;
+    if void_count == 0 {
+        return mask;
+    }
+
+    let mut indices: Vec<usize> = (0..cell_count).collect();
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(rng_seed ^ 0xA110_CA7E_BEEF_5EEDu64);
+    indices.shuffle(&mut rng);
+
+    for &index in indices.iter().take(void_count) {
+        mask[index] = true;
+    }
+    mask
 }

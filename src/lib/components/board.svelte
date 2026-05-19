@@ -223,8 +223,29 @@
   }
 
   const terrain = $derived(buildTerrainLayer($cells));
-  const ribbonBase = $derived(buildRibbonLayer($cells, 0.24, 0.13));
-  const ribbonHighlight = $derived(buildRibbonLayer($cells, 0.13, 0.16));
+
+  // `*_HALF_WIDTH_FACTOR`: ribbon thickness as a fraction of cell radius.
+  // `*_LIFT_FACTOR`: vertical offset above the terrain, also as a fraction of cell radius (keeps z-fight margin proportional and prevents the sheen from towering over tiny cells at high counts).
+  const MAP_AREA = 100 * 100;
+  const RIBBON_BASE_HALF_WIDTH_FACTOR = 0.025;
+  const RIBBON_BASE_LIFT_FACTOR = 0.01;
+  const RIBBON_HIGHLIGHT_HALF_WIDTH_FACTOR = 0.01;
+  const RIBBON_HIGHLIGHT_LIFT_FACTOR = 0.036;
+  const cellRadius = $derived(Math.sqrt(MAP_AREA / (Math.PI * Math.max(1, $cells.length))));
+  const ribbonBase = $derived(
+    buildRibbonLayer(
+      $cells,
+      cellRadius * RIBBON_BASE_HALF_WIDTH_FACTOR,
+      cellRadius * RIBBON_BASE_LIFT_FACTOR,
+    ),
+  );
+  const ribbonHighlight = $derived(
+    buildRibbonLayer(
+      $cells,
+      cellRadius * RIBBON_HIGHLIGHT_HALF_WIDTH_FACTOR,
+      cellRadius * RIBBON_HIGHLIGHT_LIFT_FACTOR,
+    ),
+  );
   const cellMeta = $derived(new CellMetaTexture($cells.length));
 
   // Dispose old GPU buffers when geometry / metadata texture is rebuilt.
@@ -267,7 +288,7 @@
       fragmentShader: ribbonFragmentShader,
       side: DoubleSide,
       uniforms: {
-        uColor: { value: new Color("#8fbdd0") },
+        uColor: { value: new Color("#08090c") },
         uCellMeta: { value: cellMeta.texture },
         uCellMetaSize: { value: cellMeta.width },
       },
@@ -280,7 +301,7 @@
       fragmentShader: ribbonFragmentShader,
       side: DoubleSide,
       uniforms: {
-        uColor: { value: new Color("#e7fbff") },
+        uColor: { value: new Color("#f4fbff") },
         uCellMeta: { value: cellMeta.texture },
         uCellMetaSize: { value: cellMeta.width },
       },

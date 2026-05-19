@@ -25,7 +25,12 @@ void main() {
   vec4 meta = texture2D(uCellMeta, metaUv);
   float isVoid = meta[CELL_META_VOID];
   float isExplored = meta[CELL_META_EXPLORED];
-  if (isVoid > 0.5) discard;
+  // Void cells are hidden (look like any other cell) until they're explored;
+  // once clicked they reveal themselves as solid black.
+  if (isVoid > 0.5 && isExplored > 0.5) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
 
   float elevation = remapClamped(vHeight, elevationMin, elevationMax, 0.0, 1.0);
 

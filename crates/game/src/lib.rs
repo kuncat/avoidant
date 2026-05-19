@@ -103,6 +103,10 @@ pub struct GameOptions {
     #[tsify(optional)]
     /** Maximum vertex height in world units. Default: 0.4 */
     elevation_max: Option<f64>,
+    #[tsify(optional)]
+    /** Fraction of cells to mark as void (impassable holes) in `[0.0, 1.0]`.
+     * Selection is deterministic for a given `rngSeed`. Default: 0.15625 */
+    void_fraction: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -206,6 +210,7 @@ pub struct GameState {
     spikiness: f64,
     elevation_min: f64,
     elevation_max: f64,
+    void_fraction: f64,
 }
 
 #[wasm_bindgen]
