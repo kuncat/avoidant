@@ -1,4 +1,5 @@
 varying vec3 vWorldPosition;
+varying vec3 vNormal;
 varying float vHeight;
 varying float vCellIndex;
 varying float vFallProgress;
@@ -73,11 +74,10 @@ void main() {
   vec3 highColor = mix(unexploredHigh, exploredHigh, colorFactor);
   vec3 terrainColor = mix(lowColor, highColor, elevation);
 
-  // Flat-shaded hillshading: derive per-face normal from screen-space derivatives
-  // of world position so each triangle gets its own light contribution.
-  vec3 faceNormal = normalize(cross(dFdx(vWorldPosition), dFdy(vWorldPosition)));
-  if (faceNormal.y < 0.0) faceNormal = -faceNormal;
-  float ndotl = max(dot(faceNormal, normalize(uLightDir)), 0.0);
+  // Smooth hillshading
+  vec3 shadingNormal = normalize(vNormal);
+  if (shadingNormal.y < 0.0) shadingNormal = -shadingNormal;
+  float ndotl = max(dot(shadingNormal, normalize(uLightDir)), 0.0);
   float shade = clamp(uAmbient + uDiffuse * ndotl, 0.0, 1.5);
   terrainColor *= shade;
 

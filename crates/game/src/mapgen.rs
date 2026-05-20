@@ -7,7 +7,7 @@ use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::{GameOptions, MapCell};
+use crate::{GameOptions, MapCell, MapData, TerrainTriangles};
 
 pub(crate) fn generate_map_cells(
     requested_cell_count: usize,
@@ -88,15 +88,9 @@ pub(crate) fn generate_map_cells(
     Ok(output_cells)
 }
 
-/// Wasm entry point used by the dedicated map-generation Web Worker.
-///
-/// The worker hosts its own wasm instance, calls this function, and posts the
-/// resulting cells back to the main thread. Running mapgen in a worker keeps
-/// the UI responsive without forcing the main wasm bundle to be built with
-/// `+atomics` / shared memory (which would make iroh's main-thread async
-/// trap on `memory.atomic.wait32`).
-#[wasm_bindgen(js_name = "generateMapCells", unchecked_return_type = "MapCell[]")]
-pub fn generate_map_cells_js(options: GameOptions) -> Result<JsValue, JsValue> {
+/// Build map cells and a subdivided terrain triangle mesh.
+#[wasm_bindgen(js_name = "generateMapData")]
+pub fn generate_map_data_js(options: GameOptions) -> Result<MapData, JsValue> {
     if options.num_cells > usize::MAX as u64 {
         return Err(JsValue::from_str(
             "numCells is too large for this target architecture",
@@ -108,6 +102,7 @@ pub fn generate_map_cells_js(options: GameOptions) -> Result<JsValue, JsValue> {
     let spikiness = options.spikiness.unwrap_or(0.4).clamp(0.0, 1.0);
     let elevation_min = options.elevation_min.unwrap_or(-0.4);
     let elevation_max = options.elevation_max.unwrap_or(0.4);
+    let subdivisions = options.terrain_subdivisions.unwrap_or(4).clamp(1, 16);
 
     let cells = generate_map_cells(
         options.num_cells as usize,
@@ -119,12 +114,121 @@ pub fn generate_map_cells_js(options: GameOptions) -> Result<JsValue, JsValue> {
     )
     .map_err(|err| JsValue::from_str(&err))?;
 
-    let output = js_sys::Array::new();
-    for cell in cells {
-        let cell_value = serde_wasm_bindgen::to_value(&cell)?;
-        output.push(&cell_value);
+    let terrain = generate_terrain_triangles(
+        &cells,
+        options.rng_seed,
+        spikiness,
+        (elevation_min, elevation_max),
+        subdivisions,
+    );
+
+    Ok(MapData { cells, terrain })
+}
+
+/// Builds a flat triangle mesh that covers every cell, with each fan triangle subdivided into `subdivisions²` sub-triangles using barycentric tessellation.
+///
+/// Each emitted vertex resamples the terrain noise at its position, so detail no longer pins to Voronoi corners.
+///
+/// Output layout: `positions` is `[x, height, y]`-packed, three floats per vertex, three vertices per triangle. `cell_indices` carries the owning cell index for each vertex (one entry per vertex).
+fn generate_terrain_triangles(
+    cells: &[MapCell],
+    rng_seed: u64,
+    spikiness: f64,
+    elevation_range: (f64, f64),
+    subdivisions: u32,
+) -> TerrainTriangles {
+    let s = subdivisions.max(1);
+    let s_f = s as f64;
+
+    let mut positions: Vec<f32> = Vec::new();
+    let mut normals: Vec<f32> = Vec::new();
+    let mut cell_indices: Vec<u32> = Vec::new();
+
+    // Finite-difference step. Small enough to capture the detail layer of `vertex_height` (whose smallest scale is roughly `(25 - 22*spikiness) / 3`, i.e. ~1.0 at max spikiness), but large enough to avoid floating-point cancellation noise.
+    let eps = 0.05_f64;
+    let sample = |x: f64, y: f64| -> ([f32; 3], [f32; 3]) {
+        let h = vertex_height(x, y, rng_seed, spikiness, elevation_range);
+        let hx = vertex_height(x + eps, y, rng_seed, spikiness, elevation_range);
+        let hy = vertex_height(x, y + eps, rng_seed, spikiness, elevation_range);
+        let dh_dx = (hx - h) / eps;
+        let dh_dy = (hy - h) / eps;
+        // Surface z = h(x, y); tangents are (1, dh/dx, 0) and (0, dh/dy, 1) in (x, height, z) world axes. Normal = T_x \u00d7 T_y normalized.
+        let nx = -dh_dx;
+        let ny = 1.0_f64;
+        let nz = -dh_dy;
+        let inv_len = 1.0 / (nx * nx + ny * ny + nz * nz).sqrt();
+        (
+            [x as f32, h as f32, y as f32],
+            [
+                (nx * inv_len) as f32,
+                (ny * inv_len) as f32,
+                (nz * inv_len) as f32,
+            ],
+        )
+    };
+
+    for (cell_idx, cell) in cells.iter().enumerate() {
+        let verts: Vec<(f64, f64)> = cell.vertex_xz().collect();
+        if verts.len() < 3 {
+            continue;
+        }
+        let cell_idx_u32 = cell_idx as u32;
+        let a = verts[0];
+
+        // Fan-triangulate the polygon, then barycentrically subdivide each fan triangle. The fan apex `a` is shared, so every fan triangle inside a cell already agrees on sub-vertex positions along the radii from `a`.
+        for j in 1..verts.len() - 1 {
+            let b = verts[j];
+            let c = verts[j + 1];
+
+            // Walk the (i, k) lattice where i + k <= s. Weights: a -> (s - i - k)/s, b -> k/s, c -> i/s.
+            for i in 0..s {
+                for k in 0..(s - i) {
+                    let p00 = bary_xy(a, b, c, i, k, s_f);
+                    let p01 = bary_xy(a, b, c, i, k + 1, s_f);
+                    let p10 = bary_xy(a, b, c, i + 1, k, s_f);
+
+                    let (v00, n00) = sample(p00.0, p00.1);
+                    let (v01, n01) = sample(p01.0, p01.1);
+                    let (v10, n10) = sample(p10.0, p10.1);
+                    positions.extend_from_slice(&v00);
+                    positions.extend_from_slice(&v01);
+                    positions.extend_from_slice(&v10);
+                    normals.extend_from_slice(&n00);
+                    normals.extend_from_slice(&n01);
+                    normals.extend_from_slice(&n10);
+                    cell_indices.extend_from_slice(&[cell_idx_u32; 3]);
+
+                    if i + k + 1 < s {
+                        let p11 = bary_xy(a, b, c, i + 1, k + 1, s_f);
+                        let (v11, n11) = sample(p11.0, p11.1);
+                        positions.extend_from_slice(&v01);
+                        positions.extend_from_slice(&v11);
+                        positions.extend_from_slice(&v10);
+                        normals.extend_from_slice(&n01);
+                        normals.extend_from_slice(&n11);
+                        normals.extend_from_slice(&n10);
+                        cell_indices.extend_from_slice(&[cell_idx_u32; 3]);
+                    }
+                }
+            }
+        }
     }
-    Ok(output.into())
+
+    TerrainTriangles {
+        positions,
+        normals,
+        cell_indices,
+    }
+}
+
+fn bary_xy(a: (f64, f64), b: (f64, f64), c: (f64, f64), i: u32, k: u32, s: f64) -> (f64, f64) {
+    let wa = (s - i as f64 - k as f64) / s;
+    let wb = (k as f64) / s;
+    let wc = (i as f64) / s;
+    (
+        wa * a.0 + wb * b.0 + wc * c.0,
+        wa * a.1 + wb * b.1 + wc * c.1,
+    )
 }
 
 /// Computes terrain elevation for a world-space point using layered value noise.

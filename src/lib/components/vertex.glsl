@@ -1,9 +1,11 @@
 attribute float aCellIndex;
+attribute vec3 aNormal;
 
 uniform sampler2D uCellMeta;
 uniform float uCellMetaSize;
 
 varying vec3 vWorldPosition;
+varying vec3 vNormal;
 varying float vHeight;
 varying float vCellIndex;
 varying float vFallProgress;
@@ -19,6 +21,8 @@ void main() {
 
   vec4 worldPosition = modelMatrix * vec4(displaced, 1.0);
   vWorldPosition = worldPosition.xyz;
+  // Smooth per-vertex normal. Interpolated across the triangle for Phong-style smooth shading instead of faceted flat shading.
+  vNormal = normalize(mat3(modelMatrix) * aNormal);
   // Keep the elevation-based color ramp anchored to the cell's original height so falling cells don't shift colors as they drop.
   vHeight = position.y;
   vCellIndex = aCellIndex;

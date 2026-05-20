@@ -1,8 +1,6 @@
 <script module lang="ts">
   import _vertexShader from "./vertex.glsl?raw";
   import _fragmentShader from "./fragment.glsl?raw";
-  import _ribbonVertexShader from "./ribbon.vertex.glsl?raw";
-  import _ribbonFragmentShader from "./ribbon.fragment.glsl?raw";
   import { PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
 
   export const MAX_PULSES = 16;
@@ -36,26 +34,23 @@
   const fallDefines = `#define VOID_FALL_DISTANCE ${VOID_FALL_DISTANCE.toFixed(1)}\n`;
 
   export const vertexShader = cellMetaDefines + fallDefines + _vertexShader;
-  export const ribbonVertexShader = cellMetaDefines + fallDefines + _ribbonVertexShader;
   export const fragmentShader =
     `#define MAX_PULSES ${MAX_PULSES}\n` +
     `#define SWEEP_BAND ${PULSE_SWEEP_BAND.toFixed(6)}\n` +
     cellMetaDefines +
     _fragmentShader;
-  export const ribbonFragmentShader = cellMetaDefines + _ribbonFragmentShader;
 </script>
 
 <script lang="ts">
   import { onMount } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { Pulse } from "wasm-pkg";
-  import type { GameState, MapCell } from "wasm-pkg";
+  import type { GameState } from "wasm-pkg";
   import { T, useThrelte } from "@threlte/core";
   import { interactivity, Text, Billboard } from "@threlte/extras";
   import {
     BufferAttribute,
     BufferGeometry,
-    Color,
     DataTexture,
     DoubleSide,
     Mesh,
@@ -72,9 +67,10 @@
 
   interface Props {
     gameState: GameState;
+    terrain?: { positions: number[]; normals: number[]; cellIndices: number[] } | undefined;
   }
 
-  let { gameState = $bindable() }: Props = $props();
+  let { gameState = $bindable(), terrain = undefined }: Props = $props();
   let cells = $derived(gameState?.cells);
   let cellMetadata = $derived(gameState?.cellMetadata);
   let pulses = $derived(gameState?.uiState?.pulses);
@@ -112,89 +108,76 @@
   });
 
   /**
-   * Build a merged triangle mesh for all cell interiors.
+   * Build a merged triangle mesh for all cell interiors from a Rust-side subdivided terrain payload.
    *
-   * Fan-triangulates each cell's polygon and packs every vertex with an `aCellIndex` attribute so the fragment shader can look up per-cell metadata in {@link CellMetaTexture}.
+   * Each emitted vertex carries an `aCellIndex` attribute so the fragment shader can look up per-cell metadata in {@link CellMetaTexture}. The subdivision (and therefore the terrain detail) is decoupled from the Voronoi cell-corner density and is controlled by the `terrainSubdivisions` field on {@link GameOptions}.
    *
-   * @param cellList - Map cells whose `vertices` are `[x, y, height]` 3ples.
-   * @returns A `BufferGeometry` with `position` and `aCellIndex` attributes.
+   * When `shrinkFactor < 1`, every vertex's XZ position is contracted toward its cell's XZ centroid by that factor, producing gaps between adjacent cells. A second copy of the geometry rendered un-shrunken (with `shrinkFactor = 1`) underneath shows through those gaps as the "gap lines". Y values and normals are preserved as-is. At the 3-4% shrink range the slight inconsistency between a perimeter vertex's stored Y/normal and the true noise surface at its new XZ is invisible.
+   *
+   * @param payload - Pre-built positions (`[x, height, y]`-packed) and
+   *   per-vertex cell indices produced by the mapgen worker. `undefined`
+   *   yields an empty geometry, which is the expected state before mapgen
+   *   completes.
+   * @param insetDistance - World-space distance (XZ plane) to pull each vertex toward its cell centroid, producing a uniform-width gap along every cell boundary. `0` (default) leaves the mesh untouched. Per vertex the move is clamped to 80% of its centroid distance to avoid collapsing small cells.
+   * @returns A `BufferGeometry` with `position`, `aNormal`, and `aCellIndex` attributes.
    */
-  function buildTerrainLayer(cellList: MapCell[]): BufferGeometry {
-    const cellCount = cellList.length;
-    const positions: number[] = [];
-    const aCellIndex: number[] = [];
+  function buildTerrainLayer(
+    payload: { positions: number[]; normals: number[]; cellIndices: number[] } | undefined,
+    insetDistance = 0,
+  ): BufferGeometry {
+    const geometry = new BufferGeometry();
+    if (!payload || payload.positions.length === 0) {
+      geometry.setAttribute("position", new BufferAttribute(new Float32Array(0), 3));
+      geometry.setAttribute("aNormal", new BufferAttribute(new Float32Array(0), 3));
+      geometry.setAttribute("aCellIndex", new BufferAttribute(new Float32Array(0), 1));
+      return geometry;
+    }
 
-    for (let i = 0; i < cellCount; i++) {
-      const vertices = cellList[i].vertices;
-
-      if (vertices.length >= 3) {
-        const [ax, ay, ah] = vertices[0];
-        for (let j = 1; j < vertices.length - 1; j++) {
-          const [bx, by, bh] = vertices[j];
-          const [cx, cy, ch] = vertices[j + 1];
-          positions.push(ax, ah, ay, bx, bh, by, cx, ch, cy);
-          for (let k = 0; k < 3; k++) aCellIndex.push(i);
+    const positions = new Float32Array(payload.positions);
+    if (insetDistance > 0) {
+      const cellIndices = payload.cellIndices;
+      const vertexCount = cellIndices.length;
+      let maxCell = 0;
+      for (let i = 0; i < vertexCount; i++) {
+        if (cellIndices[i] > maxCell) maxCell = cellIndices[i];
+      }
+      const cellCount = maxCell + 1;
+      const sumX = new Float64Array(cellCount);
+      const sumZ = new Float64Array(cellCount);
+      const count = new Uint32Array(cellCount);
+      for (let i = 0; i < vertexCount; i++) {
+        const c = cellIndices[i];
+        sumX[c] += positions[i * 3 + 0];
+        sumZ[c] += positions[i * 3 + 2];
+        count[c]++;
+      }
+      const cx = new Float32Array(cellCount);
+      const cz = new Float32Array(cellCount);
+      for (let c = 0; c < cellCount; c++) {
+        if (count[c] > 0) {
+          cx[c] = sumX[c] / count[c];
+          cz[c] = sumZ[c] / count[c];
         }
+      }
+      for (let i = 0; i < vertexCount; i++) {
+        const c = cellIndices[i];
+        const dx = positions[i * 3 + 0] - cx[c];
+        const dz = positions[i * 3 + 2] - cz[c];
+        const d = Math.hypot(dx, dz);
+        if (d < 1e-6) continue;
+        const move = Math.min(insetDistance, d);
+        const k = move / d;
+        positions[i * 3 + 0] -= dx * k;
+        positions[i * 3 + 2] -= dz * k;
       }
     }
 
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
-    geometry.setAttribute("aCellIndex", new BufferAttribute(new Float32Array(aCellIndex), 1));
-    return geometry;
-  }
-
-  /**
-   * Build a merged ribbon mesh that traces each cell's edges as a thin quad strip.
-   *
-   * Each edge is extruded along its 2D normal by `halfWidth` and lifted by `lift` to sit above the terrain. Every emitted vertex carries an `aCellIndex` attribute so the fragment shader can discard ribbon segments that belong to void cells.
-   *
-   * @param cellList - Map cells whose `vertices` are `[x, y, height]` 3ples.
-   * @param halfWidth - Half the ribbon's width in world units.
-   * @param lift - Vertical offset added to each ribbon vertex.
-   * @returns A `BufferGeometry` with `position` and `aCellIndex` attributes.
-   */
-  function buildRibbonLayer(cellList: MapCell[], halfWidth: number, lift: number): BufferGeometry {
-    const cellCount = cellList.length;
-    const positions: number[] = [];
-    const aCellIndex: number[] = [];
-
-    for (let i = 0; i < cellCount; i++) {
-      const vertices = cellList[i].vertices;
-
-      if (vertices.length >= 2) {
-        for (let v = 0; v < vertices.length; v++) {
-          const [ax, ay, ah] = vertices[v];
-          const [bx, by, bh] = vertices[(v + 1) % vertices.length];
-          const dx = bx - ax;
-          const dy = by - ay;
-          const length = Math.hypot(dx, dy);
-          if (length < 1e-6) continue;
-
-          const nx = (-dy / length) * halfWidth;
-          const ny = (dx / length) * halfWidth;
-          const yA = ah + lift;
-          const yB = bh + lift;
-          const aLx = ax + nx,
-            aLz = ay + ny;
-          const aRx = ax - nx,
-            aRz = ay - ny;
-          const bLx = bx + nx,
-            bLz = by + ny;
-          const bRx = bx - nx,
-            bRz = by - ny;
-
-          // Two triangles forming the edge quad.
-          positions.push(aLx, yA, aLz, aRx, yA, aRz, bLx, yB, bLz);
-          positions.push(bLx, yB, bLz, aRx, yA, aRz, bRx, yB, bRz);
-          for (let k = 0; k < 6; k++) aCellIndex.push(i);
-        }
-      }
-    }
-
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
-    geometry.setAttribute("aCellIndex", new BufferAttribute(new Float32Array(aCellIndex), 1));
+    geometry.setAttribute("position", new BufferAttribute(positions, 3));
+    geometry.setAttribute("aNormal", new BufferAttribute(new Float32Array(payload.normals), 3));
+    geometry.setAttribute(
+      "aCellIndex",
+      new BufferAttribute(new Float32Array(payload.cellIndices), 1),
+    );
     return geometry;
   }
 
@@ -271,30 +254,11 @@
     }
   }
 
-  const terrain = $derived(buildTerrainLayer($cells));
-
-  // `*_HALF_WIDTH_FACTOR`: ribbon thickness as a fraction of cell radius.
-  // `*_LIFT_FACTOR`: vertical offset above the terrain, also as a fraction of cell radius (keeps z-fight margin proportional and prevents the sheen from towering over tiny cells at high counts).
+  // Each cell's vertices are pulled toward its XZ centroid by a constant distance (`CELL_GAP_HALF_WIDTH`). The total visible gap width is ~2× this value.
   const MAP_AREA = 100 * 100;
-  const RIBBON_BASE_HALF_WIDTH_FACTOR = 0.025;
-  const RIBBON_BASE_LIFT_FACTOR = 0.001;
-  const RIBBON_HIGHLIGHT_HALF_WIDTH_FACTOR = 0.005;
-  const RIBBON_HIGHLIGHT_LIFT_FACTOR = 0.0011;
+  const CELL_GAP_HALF_WIDTH = 0.08;
   const cellRadius = $derived(Math.sqrt(MAP_AREA / (Math.PI * Math.max(1, $cells.length))));
-  const ribbonBase = $derived(
-    buildRibbonLayer(
-      $cells,
-      cellRadius * RIBBON_BASE_HALF_WIDTH_FACTOR,
-      cellRadius * RIBBON_BASE_LIFT_FACTOR,
-    ),
-  );
-  const ribbonHighlight = $derived(
-    buildRibbonLayer(
-      $cells,
-      cellRadius * RIBBON_HIGHLIGHT_HALF_WIDTH_FACTOR,
-      cellRadius * RIBBON_HIGHLIGHT_LIFT_FACTOR,
-    ),
-  );
+  const terrainGeometry = $derived(buildTerrainLayer(terrain, CELL_GAP_HALF_WIDTH));
   const cellMeta = $derived(new CellMetaTexture($cells.length));
 
   let fallStart = new SvelteMap<number, number>();
@@ -308,10 +272,10 @@
 
   // Dispose old GPU buffers when geometry / metadata texture is rebuilt.
   $effect(() => {
-    const layers = [terrain, ribbonBase, ribbonHighlight];
+    const layer = terrainGeometry;
     const meta = cellMeta;
     return () => {
-      layers.forEach((layer) => layer.dispose());
+      layer.dispose();
       meta.dispose();
     };
   });
@@ -342,50 +306,31 @@
     }),
   );
 
-  let ribbonBaseMaterial = $derived(
-    new ShaderMaterial({
-      vertexShader: ribbonVertexShader,
-      fragmentShader: ribbonFragmentShader,
-      side: DoubleSide,
-      transparent: true,
-      uniforms: {
-        uColor: { value: new Color("#08090c") },
-        uCellMeta: { value: cellMeta.texture },
-        uCellMetaSize: { value: cellMeta.width },
-      },
-    }),
-  );
-
-  let ribbonHighlightMaterial = $derived(
-    new ShaderMaterial({
-      vertexShader: ribbonVertexShader,
-      fragmentShader: ribbonFragmentShader,
-      side: DoubleSide,
-      transparent: true,
-      uniforms: {
-        uColor: { value: new Color("#f4fbff") },
-        uCellMeta: { value: cellMeta.texture },
-        uCellMetaSize: { value: cellMeta.width },
-      },
-    }),
-  );
-
   // Dispose materials when re-derived.
   $effect(() => {
-    const materials = [terrainMaterial, ribbonBaseMaterial, ribbonHighlightMaterial];
+    const material = terrainMaterial;
     return () => {
-      materials.forEach((material) => material.dispose());
+      material.dispose();
     };
   });
 
-  let terrainMesh = $derived(new Mesh(terrain, terrainMaterial));
-  let ribbonBaseMesh = $derived(new Mesh(ribbonBase, ribbonBaseMaterial));
-  let ribbonHighlightMesh = $derived(new Mesh(ribbonHighlight, ribbonHighlightMaterial));
+  let terrainMesh = $derived(new Mesh(terrainGeometry, terrainMaterial));
 
-  // Per-cell centroids (XZ from polygon vertex average, Y from the cell's max vertex height plus a small lift) used to position void-neighbor count labels just above the terrain.
   const LABEL_LIFT_FACTOR = 0.075;
+  const terrainCellMaxHeights = $derived.by(() => {
+    const result: number[] = new Array($cells.length).fill(-Infinity);
+    if (!terrain) return result;
+    const positions = terrain.positions;
+    const cellIndices = terrain.cellIndices;
+    for (let i = 0; i < cellIndices.length; i++) {
+      const ci = cellIndices[i];
+      const h = positions[i * 3 + 1];
+      if (h > result[ci]) result[ci] = h;
+    }
+    return result;
+  });
   const cellLabelAnchors = $derived(
-    $cells.map((cell) => {
+    $cells.map((cell, idx) => {
       const vs = cell.vertices;
       if (vs.length === 0) return { x: 0, y: 0, z: 0 };
       let sx = 0;
@@ -396,6 +341,8 @@
         sz += vy;
         if (vh > maxH) maxH = vh;
       }
+      const terrainMax = terrainCellMaxHeights[idx];
+      if (terrainMax !== undefined && terrainMax > maxH) maxH = terrainMax;
       return {
         x: sx / vs.length,
         y: maxH + cellRadius * LABEL_LIFT_FACTOR,
@@ -470,7 +417,7 @@
 
   function handleTerrainClick(event: { point: Vector3; face: { a: number } | null }) {
     if (!event.face || $cells.length === 0) return;
-    const aCellIndexArr = terrain.attributes.aCellIndex.array as Float32Array;
+    const aCellIndexArr = terrainGeometry.attributes.aCellIndex.array as Float32Array;
     const cellIndex = aCellIndexArr[event.face.a];
     if (cellIndex === undefined) return;
     gameState.queueExplorePulse(cellIndex, event.point.x, event.point.y, event.point.z);
@@ -478,8 +425,6 @@
 </script>
 
 <T is={terrainMesh} onclick={handleTerrainClick} />
-<T is={ribbonBaseMesh} />
-<T is={ribbonHighlightMesh} />
 
 {#each $cellMetadata as entry, i (i)}
   {#if entry.isExplored && !entry.isVoid && entry.voidNeighborCount > 0}

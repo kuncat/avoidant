@@ -7,7 +7,6 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 use svelte_store::Readable;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
-use crate::mapgen;
 use crate::mutation::{Mutation, MutationOrigin};
 use crate::net::TicketOpts;
 use crate::score::ScoreState;
@@ -27,10 +26,6 @@ impl GameState {
         let options_json = JSON::stringify(&options_value)?
             .as_string()
             .ok_or_else(|| JsValue::from_str("Failed to serialize game options"))?;
-
-        let max_samples = options.max_samples.unwrap_or(20.0).clamp(1.0, 128.0) as u32;
-        let slack = options.slack.unwrap_or(0.25).clamp(0.0, 0.95) as f32;
-        let spikiness = options.spikiness.unwrap_or(0.4).clamp(0.0, 1.0);
         let elevation_min = options.elevation_min.unwrap_or(-0.4);
         let elevation_max = options.elevation_max.unwrap_or(0.4);
         let void_fraction = options.void_fraction.unwrap_or(0.15625).clamp(0.0, 1.0);
@@ -58,11 +53,7 @@ impl GameState {
             last_inbound_mutation_ms: Rc::new(RefCell::new(None)),
             last_outbound_mutation_ms: Rc::new(RefCell::new(None)),
             ui_state: UiState::new(),
-            num_cells: options.num_cells,
             rng_seed: options.rng_seed,
-            max_samples,
-            slack,
-            spikiness,
             elevation_min,
             elevation_max,
             void_fraction,
@@ -216,37 +207,9 @@ impl GameState {
         Ok(output_cells.into())
     }
 
-    /// Synchronously generate the map on the current thread.
-    ///
-    /// This blocks the caller. The UI uses a dedicated Web Worker that calls
-    /// the standalone [`crate::mapgen::generate_map_cells_js`] entry point and
-    /// then passes the result to [`GameState::apply_map_cells`]; this method
-    /// is retained for tests and headless scripting only.
-    #[wasm_bindgen(js_name = "generateMap", unchecked_return_type = "MapCell[]")]
-    pub fn generate_map(&mut self) -> Result<JsValue, JsValue> {
-        if self.num_cells > usize::MAX as u64 {
-            return Err(JsValue::from_str(
-                "numCells is too large for this target architecture",
-            ));
-        }
-
-        let cells = mapgen::generate_map_cells(
-            self.num_cells as usize,
-            self.rng_seed,
-            self.max_samples,
-            self.slack,
-            self.spikiness,
-            (self.elevation_min, self.elevation_max),
-        )
-        .map_err(|err| JsValue::from_str(&err))?;
-
-        self.apply_generated_cells(cells)
-    }
-
     /// Apply cells produced off-thread (typically by the mapgen Web Worker).
     ///
-    /// `cells` must be a JS array of objects matching the `MapCell` shape
-    /// (i.e. `{ vertices: [[x, y, z], ...] }`).
+    /// `cells` must be a JS array of objects matching the `MapCell` shape (i.e. `{ vertices: [[x, y, z], ...] }`).
     #[wasm_bindgen(js_name = "applyMapCells", unchecked_return_type = "MapCell[]")]
     pub fn apply_map_cells(
         &mut self,

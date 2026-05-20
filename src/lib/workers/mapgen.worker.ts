@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import init, { generateMapCells, type GameOptions, type MapCell } from "wasm-pkg";
+import init, { generateMapData, type GameOptions, type MapData } from "wasm-pkg";
 
 export interface GenerateMessage {
   type: "generate";
@@ -11,7 +11,8 @@ export interface GenerateMessage {
 export interface ResultResponse {
   type: "result";
   requestId: number;
-  cells: MapCell[];
+  cells: MapData["cells"];
+  terrain: MapData["terrain"];
 }
 
 export interface ErrorResponse {
@@ -43,8 +44,18 @@ ctx.addEventListener("message", (event: MessageEvent<GenerateMessage>) => {
   void (async () => {
     try {
       await ensureWasm();
-      const cells = generateMapCells(message.options);
-      respond({ type: "result", requestId: message.requestId, cells });
+      const data = generateMapData(message.options);
+      const terrain: MapData["terrain"] = {
+        positions: data.terrain.positions,
+        normals: data.terrain.normals,
+        cellIndices: data.terrain.cellIndices,
+      };
+      respond({
+        type: "result",
+        requestId: message.requestId,
+        cells: data.cells,
+        terrain,
+      });
     } catch (error) {
       respond({
         type: "error",

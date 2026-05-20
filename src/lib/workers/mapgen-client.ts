@@ -3,12 +3,12 @@
  *
  * A single worker is kept alive across calls so the wasm module is only initialized once. Each call gets a unique requestId so we can multiplex safely even though map generation is normally serial.
  */
-import type { GameOptions, MapCell } from "wasm-pkg";
+import type { GameOptions, MapData } from "wasm-pkg";
 import type { WorkerResponse } from "$lib/workers/mapgen.worker";
 import MapgenWorker from "$lib/workers/mapgen.worker?worker";
 
 interface PendingRequest {
-  resolve: (cells: MapCell[]) => void;
+  resolve: (result: MapData) => void;
   reject: (error: Error) => void;
 }
 
@@ -31,7 +31,10 @@ function getWorker(): Worker {
     }
     pending.delete(data.requestId);
     if (data.type === "result") {
-      entry.resolve(data.cells);
+      entry.resolve({
+        cells: data.cells,
+        terrain: data.terrain,
+      });
     } else {
       entry.reject(new Error(data.message));
     }
@@ -60,7 +63,7 @@ function getWorker(): Worker {
   return worker;
 }
 
-export function generateMap(options: GameOptions): Promise<MapCell[]> {
+export function generateMap(options: GameOptions): Promise<MapData> {
   return new Promise((resolve, reject) => {
     const worker = getWorker();
     const requestId = nextRequestId++;

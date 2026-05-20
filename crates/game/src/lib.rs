@@ -106,8 +106,32 @@ pub struct GameOptions {
     /** Maximum vertex height in world units. Default: 0.4 */
     elevation_max: Option<f64>,
     #[tsify(optional)]
+    /** Per-cell terrain mesh subdivision level. Each fan triangle inside a cell is split into `S²` sub-triangles, sampling noise at every sub-vertex. */
+    terrain_subdivisions: Option<u32>,
+    #[tsify(optional)]
     // Fraction of cells to mark as void in `[0.0, 1.0]`.
     void_fraction: Option<f64>,
+}
+
+/// Flat per-vertex terrain mesh, decoupled from cell corners.
+///
+/// `positions` is a `[x, y, z]`-packed `f32` array (length is a multiple of 9 (3 verts per triangle, 3 floats per vert). `normals` is `[nx, ny, nz]`) packed and parallel to `positions`; each vertex carries a smooth normal derived analytically from the noise field so the shader can per-pixel-interpolate it and avoid faceted flat shading. `cell_indices` carries the owning cell index for each emitted vertex (length = `positions.len() / 3`). Built once per map by [`crate::mapgen::generate_terrain_triangles`].
+#[derive(Default, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct TerrainTriangles {
+    pub positions: Vec<f32>,
+    pub normals: Vec<f32>,
+    pub cell_indices: Vec<u32>,
+}
+
+/// Voronoi cell polygons paired with the subdivided terrain triangle mesh.
+#[derive(Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi)]
+#[serde(rename_all = "camelCase")]
+pub struct MapData {
+    pub cells: Vec<MapCell>,
+    pub terrain: TerrainTriangles,
 }
 
 #[derive(Clone)]
@@ -211,15 +235,11 @@ pub struct GameState {
     last_inbound_mutation_ms: Rc<RefCell<Option<f64>>>,
     last_outbound_mutation_ms: Rc<RefCell<Option<f64>>>,
     ui_state: UiState,
-    num_cells: u64,
     rng_seed: u64,
-    max_samples: u32,
     network_node: Option<NetworkNode>,
     network_channel: Option<net::Channel>,
     network_listener_started: bool,
     game_options_json: String,
-    slack: f32,
-    spikiness: f64,
     elevation_min: f64,
     elevation_max: f64,
     void_fraction: f64,

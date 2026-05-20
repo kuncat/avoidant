@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { slide } from "svelte/transition";
-  import init, { GameState, type GameOptions } from "wasm-pkg";
+  import init, { GameState, type GameOptions, type MapData } from "wasm-pkg";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
   import { MOUSE } from "three";
@@ -14,6 +14,7 @@
 
   let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
+  let terrain = $state<MapData["terrain"] | undefined>(undefined);
   let numCellsInput = $state(SIZE_PRESETS.medium);
   let rngSeedInput = $state(0);
   let playerNameInput = $state(localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "Player");
@@ -117,7 +118,9 @@
       };
       status = "Generating map...";
       gameState = new GameState(options);
-      gameState.applyMapCells(await generateMap(options));
+      const generated = await generateMap(options);
+      gameState.applyMapCells(generated.cells);
+      terrain = generated.terrain;
       inviteTicket = "";
     } catch (error) {
       console.error("Failed to start game", error);
@@ -160,7 +163,8 @@
       }
       const nextGameState = new GameState(options);
       status = "Generating map...";
-      nextGameState.applyMapCells(await generateMap(options));
+      const generated = await generateMap(options);
+      nextGameState.applyMapCells(generated.cells);
       status = "Joining game...";
       try {
         await nextGameState.joinAsPeer(ticket, playerNameInput);
@@ -177,6 +181,7 @@
         );
       }
       gameState = nextGameState;
+      terrain = generated.terrain;
       inviteTicket = "";
       succeeded = true;
     } catch (error) {
@@ -498,7 +503,7 @@
   <div class="h-screen w-full">
     <Canvas colorSpace="srgb-linear">
       <T.OrthographicCamera makeDefault zoom={7} near={0.1} far={1000} position={[50, 180, 180]} />
-      <Board bind:gameState />
+      <Board bind:gameState {terrain} />
       <OrbitControls
         enableDamping
         enablePan={true}
