@@ -128,6 +128,11 @@ pub(crate) fn apply_mutation_with_effects(
     mutation: Mutation,
     origin: MutationOrigin,
 ) -> Result<(), JsValue> {
+    let is_completed = score_state.borrow_mut().set_with(|state| state.completed);
+    if is_completed {
+        return Ok(());
+    }
+
     let is_remote = matches!(origin, MutationOrigin::Peer);
     let (seed_index, pulse_position) = match mutation {
         Mutation::ExploreCell {
