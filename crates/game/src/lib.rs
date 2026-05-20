@@ -23,7 +23,8 @@ use net::NetworkNode;
 pub use score::ScoreState;
 pub use ui_state::UiState;
 
-const PULSE_DURATION_MS: u32 = 250; // TODO: Decrease after testing
+mod shared_constants;
+pub use shared_constants::{PULSE_MIN_DURATION_MS, PULSE_SWEEP_BAND, PULSE_SWEEP_VELOCITY};
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT_TYPES: &str = r#"
@@ -45,6 +46,8 @@ pub struct CellMetadataEntry {
     is_explored: bool,
     is_void: bool,
     void_neighbor_count: u8,
+    /// Toggled during a chord auto-reveal.
+    is_revealing: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Tsify)]
@@ -116,6 +119,8 @@ pub struct Pulse {
     created_at_ms: f64,
     duration_ms: u32,
     is_remote: bool,
+    /// World-space radius the pulse ring should grow to over its lifetime.
+    max_radius: f64,
 }
 
 impl Pulse {
@@ -126,6 +131,7 @@ impl Pulse {
         created_at_ms: f64,
         duration_ms: u32,
         is_remote: bool,
+        max_radius: f64,
     ) -> Self {
         Self {
             id,
@@ -134,6 +140,7 @@ impl Pulse {
             created_at_ms,
             duration_ms,
             is_remote,
+            max_radius,
         }
     }
 
@@ -145,6 +152,7 @@ impl Pulse {
             created_at_ms: 0.0,
             duration_ms: 1,
             is_remote: false,
+            max_radius: 0.0,
         }
     }
 }
@@ -179,6 +187,11 @@ impl Pulse {
     #[wasm_bindgen(getter, js_name = "isRemote")]
     pub fn is_remote(&self) -> bool {
         self.is_remote
+    }
+
+    #[wasm_bindgen(getter, js_name = "maxRadius")]
+    pub fn max_radius(&self) -> f64 {
+        self.max_radius
     }
 
     #[wasm_bindgen(js_name = "nullPulse")]
@@ -241,6 +254,11 @@ impl MapCell {
     pub(crate) fn neighbors(&self) -> &[u32] {
         &self.neighbors
     }
+
+    /// XZ horizontal positions of this cell's vertices in world space. Returns one `[x, z]` pair per vertex.
+    pub(crate) fn vertex_xz(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        self.vertices.iter().map(|v| (v[0], v[1]))
+    }
 }
 
 impl CellMetadataEntry {
@@ -249,11 +267,16 @@ impl CellMetadataEntry {
             is_explored,
             is_void,
             void_neighbor_count,
+            is_revealing: false,
         }
     }
 
     pub(crate) fn mark_explored(&mut self) {
         self.is_explored = true;
+    }
+
+    pub(crate) fn set_revealing(&mut self, value: bool) {
+        self.is_revealing = value;
     }
 }
 

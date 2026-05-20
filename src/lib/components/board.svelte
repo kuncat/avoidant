@@ -3,6 +3,7 @@
   import _fragmentShader from "./fragment.glsl?raw";
   import _ribbonVertexShader from "./ribbon.vertex.glsl?raw";
   import _ribbonFragmentShader from "./ribbon.fragment.glsl?raw";
+  import { PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
 
   export const MAX_PULSES = 16;
   export const VOID_FALL_DURATION_MS = 900;
@@ -18,6 +19,8 @@
     Void: 1,
     // 0..255 fall-out progress for explored void cells; 0 = on the map, 255 = fully gone.
     FallProgress: 2,
+    // 255 while a chord auto-reveal pulse is sweeping the cell. The shader uses this to render the pulse-sweep gradient (same effect as the clicked cell).
+    Revealing: 3,
   } as const;
 
   /**
@@ -35,7 +38,10 @@
   export const vertexShader = cellMetaDefines + fallDefines + _vertexShader;
   export const ribbonVertexShader = cellMetaDefines + fallDefines + _ribbonVertexShader;
   export const fragmentShader =
-    `#define MAX_PULSES ${MAX_PULSES}\n` + cellMetaDefines + _fragmentShader;
+    `#define MAX_PULSES ${MAX_PULSES}\n` +
+    `#define SWEEP_BAND ${PULSE_SWEEP_BAND.toFixed(6)}\n` +
+    cellMetaDefines +
+    _fragmentShader;
   export const ribbonFragmentShader = cellMetaDefines + _ribbonFragmentShader;
 </script>
 
@@ -247,6 +253,13 @@
       this.data[cellIndex * 4 + CellMetaChannel.FallProgress] = byte;
     }
 
+    /**
+     * Mark cell `cellIndex` as currently being revealed by a chord pulse.
+     */
+    setRevealing(cellIndex: number, value: boolean): void {
+      this.data[cellIndex * 4 + CellMetaChannel.Revealing] = value ? 255 : 0;
+    }
+
     /** Mark the texture dirty so Three.js re-uploads it on the next frame. */
     flush(): void {
       this.texture.needsUpdate = true;
@@ -324,6 +337,7 @@
         },
         pulseOriginCells: { value: new Array(MAX_PULSES).fill(-1) },
         pulseIsRemote: { value: new Array(MAX_PULSES).fill(0) },
+        pulseMaxRadii: { value: new Array(MAX_PULSES).fill(0) },
       },
     }),
   );
@@ -413,6 +427,7 @@
       const entry = $cellMetadata[i];
       meta.setExplored(i, entry.isExplored);
       meta.setVoid(i, entry.isVoid);
+      meta.setRevealing(i, entry.isRevealing);
       // Initiate the fall animation the first time we see a void cell as explored. `fellCells` records cells that have already completed their fall so subsequent re-runs of this effect (e.g. unrelated metadata changes) don't restart the animation.
       if (entry.isExplored && entry.isVoid && !fallStart.has(i) && !fellCells.has(i)) {
         fallStart.set(i, now);
@@ -441,6 +456,7 @@
   );
   let pulseOriginCellsUniform = $derived(pulsesArray.map((p) => p.originCell));
   let pulseIsRemoteUniform = $derived(pulsesArray.map((p) => (p.isRemote ? 1 : 0)));
+  let pulseMaxRadiiUniform = $derived(pulsesArray.map((p) => p.maxRadius));
 
   $effect(() => {
     terrainMaterial.uniforms.pulseCount.value = Math.min($pulses.length, MAX_PULSES);
@@ -448,6 +464,7 @@
     terrainMaterial.uniforms.pulsePositions.value = pulsePositionsUniform;
     terrainMaterial.uniforms.pulseOriginCells.value = pulseOriginCellsUniform;
     terrainMaterial.uniforms.pulseIsRemote.value = pulseIsRemoteUniform;
+    terrainMaterial.uniforms.pulseMaxRadii.value = pulseMaxRadiiUniform;
     invalidate();
   });
 

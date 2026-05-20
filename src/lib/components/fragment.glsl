@@ -12,6 +12,7 @@ uniform float pulseTimers[MAX_PULSES];
 uniform vec3 pulsePositions[MAX_PULSES];
 uniform float pulseOriginCells[MAX_PULSES];
 uniform float pulseIsRemote[MAX_PULSES];
+uniform float pulseMaxRadii[MAX_PULSES];
 uniform vec3 uLightDir;
 uniform float uAmbient;
 uniform float uDiffuse;
@@ -26,6 +27,7 @@ void main() {
   vec4 meta = texture2D(uCellMeta, metaUv);
   float isVoid = meta[CELL_META_VOID];
   float isExplored = meta[CELL_META_EXPLORED];
+  float isRevealing = meta[CELL_META_REVEALING];
   // Once an explored void cell has fully fallen, drop every fragment.
   if (isVoid > 0.5 && isExplored > 0.5 && vFallProgress >= 0.999) discard;
 
@@ -34,14 +36,14 @@ void main() {
   float totalRing = 0.0;
   float remoteRing = 0.0;
   float totalSweep = 0.0;
-  float hasSweep = 0.0;
 
   for (int i = 0; i < MAX_PULSES; i++) {
     if (i >= pulseCount) break;
 
     float pulseProgress = clamp(pulseTimers[i], 0.0, 1.0);
     float pulseActive = step(0.0001, pulseProgress) * (1.0 - step(0.9999, pulseProgress));
-    float ringRadius = pulseProgress * 20.0;
+    float maxRadius = pulseMaxRadii[i];
+    float ringRadius = pulseProgress * maxRadius;
     float ringWidth = 1.2;
     float distToOrigin = distance(vWorldPosition.xz, pulsePositions[i].xz);
     float ringDistance = abs(distToOrigin - ringRadius);
@@ -53,14 +55,14 @@ void main() {
     float isRemote = step(0.5, pulseIsRemote[i]);
     remoteRing = max(remoteRing, ringContribution * isRemote);
 
-    // Sweep coloring only for pulses that originated from this cell
-    float isPulseOriginCell = step(abs(pulseOriginCells[i] - vCellIndex), 0.5);
-    float pulseSweep = step(distToOrigin / 20.0, pulseProgress);
-    totalSweep = max(totalSweep, pulseSweep * isPulseOriginCell);
-    hasSweep = max(hasSweep, isPulseOriginCell);
+    float normalizedDist = distToOrigin / maxRadius;
+    float pulseSweep =
+      1.0 - smoothstep(pulseProgress - SWEEP_BAND, pulseProgress + SWEEP_BAND, normalizedDist);
+    totalSweep = max(totalSweep, pulseSweep);
   }
 
-  float colorFactor = max(isExplored, mix(isExplored, totalSweep, hasSweep));
+  // Revealing cells (the clicked cell and every chord-revealed neighbor) show the radial sweep gradient instead of the unexplored color until the pulse finishes and `isExplored` flips to true.
+  float colorFactor = mix(isExplored, totalSweep, isRevealing);
 
   vec3 unexploredLow = vec3(0.2588, 0.2588, 0.2784);
   vec3 unexploredHigh = vec3(0.4431, 0.451, 0.4706);

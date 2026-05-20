@@ -15,6 +15,7 @@ impl GameState {
             return;
         };
 
+        let cells = self.cells.clone();
         let cell_metadata = self.cell_metadata.clone();
         let score = self.score.clone();
         let ui_state = self.ui_state.clone();
@@ -30,6 +31,7 @@ impl GameState {
 
         listener::spawn_network_listener(
             receiver,
+            cells,
             cell_metadata,
             score,
             ui_state,
@@ -50,6 +52,7 @@ impl GameState {
         origin: MutationOrigin,
     ) -> Result<(), JsValue> {
         apply_mutation_with_effects(
+            &self.cells,
             &self.cell_metadata,
             &self.score,
             &self.ui_state,

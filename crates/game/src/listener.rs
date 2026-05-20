@@ -53,6 +53,7 @@ enum NetworkEvent {
 
 pub(crate) fn spawn_network_listener(
     receiver: wasm_streams::readable::sys::ReadableStream,
+    cells: Rc<RefCell<Readable<Array>>>,
     cell_metadata: Rc<RefCell<Readable<Array>>>,
     score: Rc<RefCell<Readable<crate::ScoreState>>>,
     ui_state: UiState,
@@ -139,6 +140,7 @@ pub(crate) fn spawn_network_listener(
                             }
 
                             if let Err(err) = apply_incoming_mutation(
+                                &cells,
                                 &cell_metadata,
                                 &score,
                                 &ui_state,
@@ -238,6 +240,7 @@ fn publish_network_snapshot(
 }
 
 fn apply_incoming_mutation(
+    cells: &Rc<RefCell<Readable<Array>>>,
     cell_metadata: &Rc<RefCell<Readable<Array>>>,
     score: &Rc<RefCell<Readable<crate::ScoreState>>>,
     ui_state: &UiState,
@@ -248,5 +251,5 @@ fn apply_incoming_mutation(
         return Ok(());
     };
 
-    apply_mutation_with_effects(cell_metadata, score, ui_state, mutation, origin)
+    apply_mutation_with_effects(cells, cell_metadata, score, ui_state, mutation, origin)
 }

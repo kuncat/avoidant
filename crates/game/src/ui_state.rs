@@ -1,10 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use js_sys::{Array, Reflect};
-use n0_future::time::Duration;
 use svelte_store::Readable;
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
-use wasm_bindgen_futures::spawn_local;
 
 use crate::{Pulse, Pulses};
 
@@ -22,18 +20,6 @@ impl UiState {
     pub fn pulses_store(&self) -> Pulses {
         self.pulses_store.borrow().get_store().into()
     }
-
-    #[wasm_bindgen(js_name = "addPulse")]
-    pub fn add_pulse(
-        &self,
-        origin_cell: usize,
-        x: f64,
-        y: f64,
-        z: f64,
-        duration_ms: u32,
-    ) -> Result<u32, JsValue> {
-        self.add_pulse_internal(origin_cell, x, y, z, duration_ms, false)
-    }
 }
 
 impl UiState {
@@ -45,6 +31,7 @@ impl UiState {
         }
     }
 
+    /// Add a pulse to the store without scheduling its removal. Callers must call [`UiState::remove_pulse_by_id`] when the pulse should disappear. This lets the chord auto-reveal atomically clean up cell metadata *before* removing the pulse, which would otherwise race with the metadata flip and leave one frame with `is_revealing=1` but no active pulse driving the sweep.
     pub(crate) fn add_pulse_internal(
         &self,
         origin_cell: usize,
@@ -53,6 +40,7 @@ impl UiState {
         z: f64,
         duration_ms: u32,
         is_remote: bool,
+        max_radius: f64,
     ) -> Result<u32, JsValue> {
         let mut next_pulse_id = self.next_pulse_id.borrow_mut();
         let pulse_id = *next_pulse_id;
@@ -66,22 +54,15 @@ impl UiState {
             created_at_ms,
             duration_ms,
             is_remote,
+            max_radius,
         );
         self.pulses.borrow_mut().push(pulse);
         self.sync_pulses_store();
 
-        let ui_state = self.clone();
-        spawn_local(async move {
-            n0_future::time::sleep(Duration::from_millis(duration_ms as u64)).await;
-            if let Err(err) = ui_state.remove_pulse_by_id(pulse_id) {
-                tracing::warn!("failed to remove expired pulse: {:?}", err);
-            }
-        });
-
         Ok(pulse_id)
     }
 
-    fn remove_pulse_by_id(&self, pulse_id: u32) -> Result<(), JsValue> {
+    pub(crate) fn remove_pulse_by_id(&self, pulse_id: u32) -> Result<(), JsValue> {
         self.pulses
             .borrow_mut()
             .retain(|pulse| pulse.id() != pulse_id);
