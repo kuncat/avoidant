@@ -246,6 +246,8 @@
   class:[&_*]:text-white={gameState}
   class:panel-wrapper-card={!gameState}
   class:panel-wrapper-header={gameState}
+  oncontextmenu={(event) => event.preventDefault()}
+  role="application"
 >
   <div
     class="panel-shell w-full"
