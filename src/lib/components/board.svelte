@@ -2,6 +2,7 @@
   import _vertexShader from "./vertex.glsl?raw";
   import _fragmentShader from "./fragment.glsl?raw";
   import { PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
+  import openSans from "$lib/assets/OpenSans-VariableFont_wdth,wght.ttf?url";
 
   export const MAX_PULSES = 16;
   export const VOID_FALL_DURATION_MS = 900;
@@ -433,6 +434,7 @@
       <Billboard position={[anchor.x, anchor.y, anchor.z]}>
         <Text
           text={String(entry.voidNeighborCount)}
+          font={openSans}
           fontSize={cellRadius * 0.7}
           color={LABEL_COLORS[Math.min(entry.voidNeighborCount, LABEL_COLORS.length - 1)]}
           anchorX="center"
