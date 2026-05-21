@@ -269,7 +269,7 @@
       {#if gameState}
         {#if $score}
           <div class="text-sm text-slate-600">
-            Score: <strong class="text-slate-800">{Math.round($score.score)}</strong>
+            Score: <strong class="text-slate-200!">{Math.round($score.score)}</strong>
             <span class="opacity-70">({Math.round($score.efficiency * 100)}%)</span>
             {#if $score.streak > 1}
               <span class="ml-2 opacity-70"
@@ -277,36 +277,38 @@
               >
             {/if}
             {#if $score.completed}
-              <span class="ml-2 font-semibold text-emerald-600">Cleared!</span>
+              <span class="ml-2 font-semibold text-emerald-600!">Avoided!</span>
             {/if}
           </div>
         {/if}
-        <div class="ml-auto text-sm text-slate-600">
+        <div class="ml-auto text-sm text-slate-200!">
           {#if connectedPeerCount > 0}
-            Players: <strong class="text-slate-800">{connectedPeerCount + 1}</strong>
+            Players: <strong>{connectedPeerCount + 1}</strong>
           {/if}
         </div>
         <div class="flex gap-2">
-          <button
-            class="btn btn-primary"
-            type="button"
-            onclick={generateInvite}
-            disabled={isGeneratingInvite}
-          >
-            {#if isGeneratingInvite}
-              <span class="spinner" aria-hidden="true"></span>
-              <span>Preparing…</span>
-            {:else}
-              Invite
-            {/if}
-          </button>
+          {#if !$score?.completed}
+            <button
+              class="btn btn-primary"
+              type="button"
+              onclick={generateInvite}
+              disabled={isGeneratingInvite}
+            >
+              {#if isGeneratingInvite}
+                <span class="spinner" aria-hidden="true"></span>
+                <span>Preparing…</span>
+              {:else}
+                Invite
+              {/if}
+            </button>
+          {/if}
           <button class="btn btn-danger" type="button" onclick={exitGame}>Exit</button>
         </div>
       {/if}
     </div>
 
     {#if status}
-      <p class="mt-2 text-sm text-slate-600">{status}</p>
+      <p class="mt-2 text-sm text-slate-600!">{status}</p>
     {/if}
 
     {#if !gameState}
