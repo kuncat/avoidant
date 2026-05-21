@@ -18,6 +18,8 @@
   let numCellsInput = $state(SIZE_PRESETS.medium);
   let rngSeedInput = $state(0);
   let playerNameInput = $state(localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "Player");
+  let isTutorialMode = $state(false);
+  let tutorialText = $state("");
   let setupMode: "host" | "join" | undefined = $state(undefined);
   let sizePreset = $state<SizePreset>("medium");
   let ticketInput = $state("");
@@ -50,7 +52,6 @@
           window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash}`);
           ticketInput = sharedTicket;
           setupMode = "join";
-          await joinGame();
         }
       } catch (error) {
         status = "Failed to initialize wasm.";
@@ -413,6 +414,10 @@
                 </div>
               </div>
             {/if}
+            <!-- <div class="checkbox-field mb-4 flex w-full items-center gap-2 px-3">
+              <label class="field-label mb-0!" for="tutorial-mode">Tutorial Mode</label>
+              <input id="tutorial-mode" type="checkbox" bind:checked={isTutorialMode} />
+            </div> -->
           </div>
           <div class="flex flex-wrap justify-center gap-2">
             <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
@@ -522,6 +527,12 @@
   </div>
 {/if}
 
+{#if isTutorialMode}
+  <div class="absolute bottom-0 h-10 w-full px-4 text-slate-200">
+    {tutorialText}
+  </div>
+{/if}
+
 <style>
   @reference "../layout.css";
 
@@ -591,6 +602,17 @@
 
   .field-label {
     @apply mb-2 block text-left text-xs font-bold tracking-wide text-slate-500 uppercase;
+  }
+
+  .checkbox-field {
+    @apply flex items-center gap-2;
+
+    input[type="checkbox"] {
+      @apply h-5 w-5 appearance-none rounded border border-gray-300 bg-gray-200 align-top transition-colors checked:border-sky-600 checked:bg-sky-500 focus:ring-0 focus:ring-offset-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-1;
+    }
+    input[type="checkbox"]:checked {
+      @apply border-sky-600 bg-sky-500;
+    }
   }
 
   .icon-btn {
