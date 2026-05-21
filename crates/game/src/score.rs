@@ -79,8 +79,13 @@ fn max_score(safe_total: u32) -> Option<f64> {
     if safe_total == 0 {
         return None;
     }
-    let max_multiplier = 1.0 + f64::from(STREAK_BONUS_CAP_STEPS) * STREAK_BONUS_PER_STEP;
-    let safe_points = SAFE_REWARD * max_multiplier * f64::from(safe_total);
+    // Sum the streak ramp: first cell gets 1.0, second 1.1, ..., up to the capped multiplier.
+    let mut safe_points = 0.0;
+    for i in 0..safe_total {
+        let streak = i as u32;
+        let multiplier = streak_multiplier(streak);
+        safe_points += SAFE_REWARD * multiplier;
+    }
     let completion_bonus = COMPLETION_BONUS_FRACTION * SAFE_REWARD * f64::from(safe_total);
     Some(safe_points + completion_bonus)
 }
@@ -103,8 +108,7 @@ pub(crate) fn update_on_explore(store: &Rc<RefCell<Readable<ScoreState>>>, is_vo
             state.score -= void_penalty(state.total_cells, state.void_total);
         } else {
             state.safe_explored = state.safe_explored.saturating_add(1);
-            // Award the current streak's multiplier, then advance the streak
-            // so the next safe explore earns a higher reward.
+            // Award the current streak's multiplier, then advance the streak so the next safe explore earns a higher reward.
             state.score += SAFE_REWARD * streak_multiplier(state.streak);
             state.streak = state.streak.saturating_add(1);
             if state.streak > state.best_streak {
