@@ -533,7 +533,7 @@
   </div>
 {/if}
 
-<style>
+<style lang="postcss">
   @reference "../layout.css";
 
   h1 {
