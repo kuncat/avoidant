@@ -577,7 +577,7 @@
   }
 
   .panel-title {
-    @apply transition-all duration-500 ease-out;
+    @apply transition-all duration-500 ease-out tracking-tighter;
   }
 
   .btn {
