@@ -543,7 +543,7 @@
                       inputmode="numeric"
                       bind:value={numCellsInput}
                       min="32"
-                      max="262144"
+                      max="5000"
                       step="1"
                     />
                   </div>
