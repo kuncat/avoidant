@@ -404,11 +404,6 @@
             >
               Score: <strong class="text-slate-200!">{Math.round($score.score)}</strong>
               <span class="opacity-70">({Math.round($score.efficiency * 100)}%)</span>
-              {#if $score.streak > 1}
-                <span class="opacity-70"
-                  >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)} streak</span
-                >
-              {/if}
               {#if $score.completed}
                 <span class="font-semibold text-emerald-600!">Avoided!</span>
               {:else}
@@ -421,6 +416,12 @@
 
             {#if showScoreBreakdown}
               <div id="score-breakdown" class="score-breakdown" role="status">
+                {#if $score.streak > 1}<p>
+                    <span class="opacity-70"
+                      >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)} streak</span
+                    >
+                  </p>
+                {/if}
                 <p class="text-emerald-600!">
                   Safe Cells Explored: <strong>{$score.safeExplored}</strong>
                 </p>
