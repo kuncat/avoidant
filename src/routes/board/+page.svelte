@@ -323,6 +323,7 @@
     ticketInput = "";
     joinError = undefined;
     status = undefined;
+    rngSeedInput = Math.floor(Date.now() / 1000);
   }
 
   async function copyInviteTicket() {
