@@ -7,6 +7,7 @@ use voronator::{VoronoiDiagram, delaunator::Point};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 
+use crate::shared_constants::{MAP_AREA, MAP_HEIGHT, MAP_WIDTH};
 use crate::{GameOptions, MapCell, MapData, TerrainTriangles};
 
 pub(crate) fn generate_map_cells(
@@ -19,7 +20,7 @@ pub(crate) fn generate_map_cells(
 ) -> Result<Vec<MapCell>, String> {
     let points = sample_points(requested_cell_count, rng_seed, max_samples, slack)?;
 
-    let Some(diagram) = VoronoiDiagram::<Point>::from_tuple(&(0.0, 0.0), &(100.0, 100.0), &points)
+    let Some(diagram) = VoronoiDiagram::<Point>::from_tuple(&(0.0, 0.0), &(MAP_WIDTH, MAP_HEIGHT), &points)
     else {
         return Err(format!(
             "Voronoi generation failed: size/seed combo isn't viable (numCells={}, rngSeed={})",
@@ -304,9 +305,9 @@ fn sample_points(
         return Ok(Vec::new());
     }
 
-    let width = 100.0_f32;
-    let height = 100.0_f32;
-    let area = width * height;
+    let width = MAP_WIDTH as f32;
+    let height = MAP_HEIGHT as f32;
+    let area = MAP_AREA as f32;
     let spacing = (area / requested_cell_count as f32).sqrt();
     let mut min_radius = (spacing * (0.6 - (0.4 * slack))).max(0.05);
     let relax_factor = (0.92 - (0.22 * slack)).clamp(0.55, 0.92);

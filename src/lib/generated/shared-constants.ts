@@ -2,6 +2,9 @@
 // crates/game/src/shared_constants.rs.
 // Edit that file, not this one.
 
+export const MAP_WIDTH = 100.0;
+export const MAP_HEIGHT = 100.0;
+export const MAP_AREA = MAP_WIDTH * MAP_HEIGHT;
 export const PULSE_SWEEP_BAND = 0.12;
 export const PULSE_SWEEP_VELOCITY = 0.1;
 export const PULSE_MIN_DURATION_MS = 80;

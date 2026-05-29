@@ -1,7 +1,7 @@
 <script module lang="ts">
   import _vertexShader from "./vertex.glsl?raw";
   import _fragmentShader from "./fragment.glsl?raw";
-  import { PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
+  import { MAP_AREA, PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
   import openSans from "$lib/assets/OpenSans-VariableFont_wdth,wght.ttf?url";
 
   export const MAX_PULSES = 16;
@@ -256,7 +256,6 @@
   }
 
   // Each cell's vertices are pulled toward its XZ centroid by a constant distance (`CELL_GAP_HALF_WIDTH`). The total visible gap width is ~2× this value.
-  const MAP_AREA = 100 * 100;
   const CELL_GAP_HALF_WIDTH = 0.08;
   const cellRadius = $derived(Math.sqrt(MAP_AREA / (Math.PI * Math.max(1, $cells.length))));
   const terrainGeometry = $derived(buildTerrainLayer(terrain, CELL_GAP_HALF_WIDTH));

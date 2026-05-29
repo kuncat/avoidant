@@ -6,10 +6,29 @@
   import { OrbitControls } from "@threlte/extras";
   import { MOUSE } from "three";
   import Board from "$lib/components/board.svelte";
+  import { MAP_HEIGHT, MAP_WIDTH } from "$lib/generated/shared-constants";
   import { generateMap } from "$lib/workers/mapgen-client";
 
   const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
   const SIZE_PRESETS = { small: 80, medium: 160, large: 320 } as const;
+  const MAP_MIN_X = 0;
+  const MAP_MIN_Z = 0;
+  const MAP_MAX_X = MAP_MIN_X + MAP_WIDTH;
+  const MAP_MAX_Z = MAP_MIN_Z + MAP_HEIGHT;
+  const MAP_CENTER_X = MAP_MIN_X + MAP_WIDTH / 2;
+  const MAP_CENTER_Z = MAP_MIN_Z + MAP_HEIGHT / 2;
+
+  const CAMERA_AZIMUTH_RAD = Math.PI / 4;
+  const CAMERA_ELEVATION_RAD = Math.atan(0.5);
+  const CAMERA_ORBIT_RADIUS = 240;
+
+  const horizontalDistance = Math.cos(CAMERA_ELEVATION_RAD) * CAMERA_ORBIT_RADIUS;
+  const cameraPosition: [number, number, number] = [
+    MAP_CENTER_X + horizontalDistance * Math.sin(CAMERA_AZIMUTH_RAD),
+    Math.sin(CAMERA_ELEVATION_RAD) * CAMERA_ORBIT_RADIUS,
+    MAP_CENTER_Z + horizontalDistance * Math.cos(CAMERA_AZIMUTH_RAD),
+  ];
+
   type SizePreset = keyof typeof SIZE_PRESETS | "custom";
 
   let status: string | undefined = $state(undefined);
@@ -33,9 +52,91 @@
   let isGeneratingInvite = $state(false);
   let networkSnapshot = $derived(gameState?.networkSnapshot);
   let score = $derived(gameState?.score);
+  let numSafeUnexploredCells = $derived(
+    $score ? Math.max(0, $score.totalCells - $score.voidTotal - $score.safeExplored) : 0,
+  );
+  let isScoreBreakdownHovered = $state(false);
+  let isScoreBreakdownPinned = $state(false);
+  let showScoreBreakdown = $derived(isScoreBreakdownHovered || isScoreBreakdownPinned);
   let connectedPeerCount = $derived(
     ($networkSnapshot?.peers ?? []).filter((peer) => peer.isConnected).length,
   );
+  let cameraZoom = $state(7);
+
+  function toggleScoreBreakdown() {
+    isScoreBreakdownPinned = !isScoreBreakdownPinned;
+  }
+
+  function handleScoreSummaryKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleScoreBreakdown();
+    }
+  }
+
+  function calculateCoverZoom(
+    viewportWidth: number,
+    viewportHeight: number,
+    elevationMin: number,
+    elevationMax: number,
+  ): number {
+    const forwardX = -Math.cos(CAMERA_ELEVATION_RAD) * Math.sin(CAMERA_AZIMUTH_RAD);
+    const forwardY = -Math.sin(CAMERA_ELEVATION_RAD);
+    const forwardZ = -Math.cos(CAMERA_ELEVATION_RAD) * Math.cos(CAMERA_AZIMUTH_RAD);
+
+    const rightX = -forwardZ;
+    const rightZ = forwardX;
+    const rightLength = Math.hypot(rightX, rightZ);
+    const normalizedRightX = rightX / rightLength;
+    const normalizedRightZ = rightZ / rightLength;
+
+    const upX = normalizedRightZ * forwardY;
+    const upY = -(normalizedRightX * forwardZ - normalizedRightZ * forwardX);
+    const upZ = -normalizedRightX * forwardY;
+
+    const yMin = Math.min(elevationMin, elevationMax);
+    const yMax = Math.max(elevationMin, elevationMax);
+    const corners = [
+      [MAP_MIN_X, yMin, MAP_MIN_Z],
+      [MAP_MIN_X, yMin, MAP_MAX_Z],
+      [MAP_MAX_X, yMin, MAP_MIN_Z],
+      [MAP_MAX_X, yMin, MAP_MAX_Z],
+      [MAP_MIN_X, yMax, MAP_MIN_Z],
+      [MAP_MIN_X, yMax, MAP_MAX_Z],
+      [MAP_MAX_X, yMax, MAP_MIN_Z],
+      [MAP_MAX_X, yMax, MAP_MAX_Z],
+    ];
+
+    let minRight = Infinity;
+    let maxRight = -Infinity;
+    let minUp = Infinity;
+    let maxUp = -Infinity;
+
+    for (const [x, y, z] of corners) {
+      const projectedRight = x * normalizedRightX + z * normalizedRightZ;
+      const projectedUp = x * upX + y * upY + z * upZ;
+      minRight = Math.min(minRight, projectedRight);
+      maxRight = Math.max(maxRight, projectedRight);
+      minUp = Math.min(minUp, projectedUp);
+      maxUp = Math.max(maxUp, projectedUp);
+    }
+
+    const projectedWidth = Math.max(1e-6, maxRight - minRight);
+    const projectedHeight = Math.max(1e-6, maxUp - minUp);
+
+    // Threlte's orthographic frustum maps roughly 1 world unit to 1 pixel at zoom=1, so a cover fit is viewport-size divided by projected world size.
+    return Math.max(viewportWidth / projectedWidth, viewportHeight / projectedHeight) * 1.01;
+  }
+
+  function setInitialCameraZoom() {
+    if (typeof window !== "undefined") {
+      const viewportWidth = Math.max(1, window.innerWidth);
+      const viewportHeight = Math.max(1, window.innerHeight);
+      const elevationMin = gameState?.elevationMin ?? 0;
+      const elevationMax = gameState?.elevationMax ?? 0;
+      cameraZoom = calculateCoverZoom(viewportWidth, viewportHeight, elevationMin, elevationMax);
+    }
+  }
 
   onMount(() => {
     rngSeedInput = Math.floor(Date.now() / 1000);
@@ -60,6 +161,17 @@
     };
 
     void initializeWasm();
+  });
+
+  $effect(() => {
+    if (!gameState) return;
+    setInitialCameraZoom();
+  });
+
+  $effect(() => {
+    if (gameState) return;
+    isScoreBreakdownHovered = false;
+    isScoreBreakdownPinned = false;
   });
 
   $effect(() => {
@@ -271,16 +383,50 @@
       </h1>
       {#if gameState}
         {#if $score}
-          <div class="text-sm text-slate-600">
-            Score: <strong class="text-slate-200!">{Math.round($score.score)}</strong>
-            <span class="opacity-70">({Math.round($score.efficiency * 100)}%)</span>
-            {#if $score.streak > 1}
-              <span class="ml-2 opacity-70"
-                >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)} streak</span
-              >
-            {/if}
-            {#if $score.completed}
-              <span class="ml-2 font-semibold text-emerald-600!">Avoided!</span>
+          <div
+            class="relative text-sm text-slate-600"
+            role="group"
+            aria-label="Score summary"
+            onmouseenter={() => (isScoreBreakdownHovered = true)}
+            onmouseleave={() => (isScoreBreakdownHovered = false)}
+          >
+            <div
+              class="score-summary"
+              role="button"
+              tabindex="0"
+              aria-expanded={showScoreBreakdown}
+              aria-controls="score-breakdown"
+              onclick={toggleScoreBreakdown}
+              onfocus={() => (isScoreBreakdownHovered = true)}
+              onblur={() => (isScoreBreakdownHovered = false)}
+              onkeydown={handleScoreSummaryKeydown}
+            >
+              Score: <strong class="text-slate-200!">{Math.round($score.score)}</strong>
+              <span class="opacity-70">({Math.round($score.efficiency * 100)}%)</span>
+              {#if $score.streak > 1}
+                <span class="opacity-70"
+                  >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)} streak</span
+                >
+              {/if}
+              {#if $score.completed}
+                <span class="font-semibold text-emerald-600!">Avoided!</span>
+              {:else}
+                <span class="opacity-80">
+                  Safe Cells Remaining:
+                  <strong class="text-slate-200!">{numSafeUnexploredCells}</strong>
+                </span>
+              {/if}
+            </div>
+
+            {#if showScoreBreakdown}
+              <div id="score-breakdown" class="score-breakdown" role="status">
+                <p class="text-emerald-600!">
+                  Safe Cells Explored: <strong>{$score.safeExplored}</strong>
+                </p>
+                <p class="text-rose-500!">
+                  Voids Discovered: <strong>{$score.voidExplored}</strong>
+                </p>
+              </div>
             {/if}
           </div>
         {/if}
@@ -511,7 +657,13 @@
 {#if gameState}
   <div class="h-screen w-full">
     <Canvas colorSpace="srgb-linear">
-      <T.OrthographicCamera makeDefault zoom={7} near={0.1} far={1000} position={[50, 180, 180]} />
+      <T.OrthographicCamera
+        makeDefault
+        zoom={cameraZoom}
+        near={0.1}
+        far={1000}
+        position={cameraPosition}
+      />
       <Board bind:gameState {terrain} />
       <OrbitControls
         enableDamping
@@ -520,7 +672,7 @@
         enableRotate={true}
         minPolarAngle={0}
         maxPolarAngle={Math.PI / 2}
-        target={[50, 0, 50]}
+        target={[MAP_CENTER_X, 0, MAP_CENTER_Z]}
         mouseButtons={{ LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }}
       />
     </Canvas>
@@ -577,7 +729,27 @@
   }
 
   .panel-title {
-    @apply transition-all duration-500 ease-out tracking-tighter;
+    @apply tracking-tighter transition-all duration-500 ease-out;
+  }
+
+  .score-summary {
+    @apply inline-flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded px-1 py-0.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400;
+  }
+
+  .score-breakdown {
+    @apply absolute top-full left-0 z-30 mt-1 min-w-max rounded border border-slate-600 bg-slate-900/95 px-3 py-2 text-xs text-slate-100 shadow-lg;
+
+    p {
+      @apply m-0;
+    }
+
+    p + p {
+      @apply mt-1;
+    }
+
+    strong {
+      @apply text-white;
+    }
   }
 
   .btn {
