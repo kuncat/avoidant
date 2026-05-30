@@ -520,7 +520,7 @@
           {/if}
         </div>
         <div class="flex gap-2">
-          {#if hasRelayServersConfigured && ($score?.safeExplored ?? 0) + ($score?.voidExplored ?? 0) === 0}
+          {#if !isTutorialMode && hasRelayServersConfigured && ($score?.safeExplored ?? 0) + ($score?.voidExplored ?? 0) === 0}
             <button
               class="btn btn-primary"
               type="button"
