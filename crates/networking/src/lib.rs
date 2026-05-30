@@ -78,20 +78,38 @@ pub struct Node {
     secret_key: SecretKey,
     router: Router,
     gossip: Gossip,
-    relay_url: RelayUrl,
+    relay_urls: Vec<RelayUrl>,
     memory_lookup: MemoryLookup,
+}
+
+fn parse_relay_urls(relay_urls: Vec<String>) -> Result<Vec<RelayUrl>> {
+    let relay_urls = relay_urls
+        .into_iter()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .collect::<Vec<_>>();
+
+    relay_urls
+        .into_iter()
+        .map(|url| RelayUrl::from_str(&url).with_context(|| format!("invalid relay URL: {url}")))
+        .collect()
 }
 
 impl Node {
     /// Spawns a gossip node.
-    pub async fn spawn(secret_key: Option<SecretKey>) -> Result<Self> {
+    pub async fn spawn(secret_key: Option<SecretKey>, relay_urls: Vec<String>) -> Result<Self> {
         let secret_key = secret_key.unwrap_or_else(SecretKey::generate);
-        let relay_url_1 = RelayUrl::from_str("https://use1-1.relay.aakside.avoidant.iroh.link/")?;
-        let relay_map: RelayMap = vec![(relay_url_1.clone())].into_iter().collect();
+        let relay_urls = parse_relay_urls(relay_urls)?;
+        let relay_mode = if relay_urls.is_empty() {
+            iroh::endpoint::RelayMode::Disabled
+        } else {
+            let relay_map: RelayMap = relay_urls.clone().into_iter().collect();
+            iroh::endpoint::RelayMode::Custom(relay_map)
+        };
         let memory_lookup = MemoryLookup::with_provenance("game_ticket_bootstrap");
         let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::N0)
             .address_lookup(memory_lookup.clone())
-            .relay_mode(iroh::endpoint::RelayMode::Custom(relay_map))
+            .relay_mode(relay_mode)
             .secret_key(secret_key.clone())
             .alpns(vec![GOSSIP_ALPN.to_vec()])
             .bind()
@@ -135,7 +153,7 @@ impl Node {
             gossip,
             router,
             secret_key,
-            relay_url: relay_url_1,
+            relay_urls,
             memory_lookup,
         })
     }
@@ -166,7 +184,7 @@ impl Node {
 
             let endpoint_addr = EndpointAddr::from_parts(
                 endpoint_id,
-                [TransportAddr::Relay(self.relay_url.clone())],
+                self.relay_urls.iter().cloned().map(TransportAddr::Relay),
             );
             self.memory_lookup.add_endpoint_info(endpoint_addr);
         }

@@ -33,11 +33,35 @@
 
   type SizePreset = keyof typeof SIZE_PRESETS | "custom";
   type Locale = (typeof locales)[number];
+  type AvoidantGameProps = {
+    relayServers?: string[];
+  };
+
+  let { relayServers = [] }: AvoidantGameProps = $props();
 
   const localeLabels: Record<Locale, string> = {
     en: "English",
     bn: "বাংলা",
   };
+
+  function normalizeRelayServerList(input: string[]): string[] {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const seen = new Set<string>();
+    const urls: string[] = [];
+    for (const item of input) {
+      const trimmed = item.trim();
+      if (!trimmed || seen.has(trimmed)) {
+        continue;
+      }
+      seen.add(trimmed);
+      urls.push(trimmed);
+    }
+    return urls;
+  }
+
+  function parseRelayServersInput(input: string): string[] {
+    return normalizeRelayServerList(input.split(/\r?\n/));
+  }
 
   let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
@@ -45,12 +69,17 @@
   let numCellsInput = $state(SIZE_PRESETS.medium);
   let rngSeedInput = $state(0);
   let playerNameInput = $state(
-    localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? m.default_player_name(),
+    typeof window !== "undefined"
+      ? (localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? m.default_player_name())
+      : m.default_player_name(),
   );
   let isTutorialMode = $state(false);
   let tutorialText = $state("");
   let setupMode: "host" | "join" | undefined = $state(undefined);
   let sizePreset = $state<SizePreset>("medium");
+  let relayServersInput = $state("");
+  let relayServersInitialized = false;
+  let hasRelayServersConfigured = $derived(parseRelayServersInput(relayServersInput).length > 0);
   let ticketInput = $state("");
   let joinError: string | undefined = $state(undefined);
   let inviteTicket = $state("");
@@ -174,6 +203,15 @@
   });
 
   $effect(() => {
+    if (relayServersInitialized) {
+      return;
+    }
+
+    relayServersInput = normalizeRelayServerList(relayServers).join("\n");
+    relayServersInitialized = true;
+  });
+
+  $effect(() => {
     if (!gameState) return;
     setInitialCameraZoom();
   });
@@ -185,10 +223,12 @@
   });
 
   $effect(() => {
-    try {
-      localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerNameInput);
-    } catch (error) {
-      console.warn("Failed to persist player name", error);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerNameInput);
+      } catch (error) {
+        console.warn("Failed to persist player name", error);
+      }
     }
   });
 
@@ -262,10 +302,12 @@
     try {
       const resolvedNumCells =
         sizePreset === "custom" ? $state.snapshot(numCellsInput) : SIZE_PRESETS[sizePreset];
+      const relayUrls = parseRelayServersInput($state.snapshot(relayServersInput));
       const options: GameOptions = {
         elevationMax: 6.0,
         elevationMin: 0.0,
         numCells: resolvedNumCells,
+        relayUrls: relayUrls.length > 0 ? relayUrls : undefined,
         rngSeed: $state.snapshot(rngSeedInput),
         spikiness: 0.8,
       };
@@ -478,7 +520,7 @@
           {/if}
         </div>
         <div class="flex gap-2">
-          {#if ($score?.safeExplored ?? 0) + ($score?.voidExplored ?? 0) === 0}
+          {#if hasRelayServersConfigured && ($score?.safeExplored ?? 0) + ($score?.voidExplored ?? 0) === 0}
             <button
               class="btn btn-primary"
               type="button"
@@ -571,6 +613,28 @@
                   </button>
                 {/each}
               </div>
+            </div>
+            <div class="mb-4 w-full px-3">
+              <details class="advanced-settings">
+                <summary class="advanced-settings-summary">{m.label_advanced_settings()}</summary>
+                <div class="advanced-settings-content">
+                  <label class="field-label" for="relay-servers"
+                    ><a
+                      href="https://docs.iroh.computer/deployment/dedicated-infrastructure"
+                      target="_blank"
+                      rel="noopener noreferrer">{m.field_relay_servers()}</a
+                    ></label
+                  >
+                  <textarea
+                    class="field field-textarea mb-1"
+                    id="relay-servers"
+                    bind:value={relayServersInput}
+                    rows="4"
+                    spellcheck="false"
+                  ></textarea>
+                  <p class="field-help">{m.text_relay_servers_hint()}</p>
+                </div>
+              </details>
             </div>
             {#if sizePreset === "custom"}
               <div class="w-full px-3" transition:slide={{ duration: 180 }}>
@@ -838,6 +902,39 @@
 
   .field-label {
     @apply mb-2 block text-left text-xs font-bold tracking-wide text-slate-500 uppercase;
+  }
+
+  .advanced-settings {
+    @apply rounded border border-slate-300 bg-slate-100;
+  }
+
+  .advanced-settings-summary {
+    @apply flex cursor-pointer list-none items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400;
+  }
+
+  .advanced-settings-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .advanced-settings-summary::after {
+    content: "+";
+    @apply text-base leading-none text-slate-500;
+  }
+
+  .advanced-settings[open] .advanced-settings-summary::after {
+    content: "-";
+  }
+
+  .advanced-settings-content {
+    @apply border-t border-slate-300 px-3 pt-3 pb-1;
+  }
+
+  .field-help {
+    @apply mb-3 text-left text-xs text-slate-500;
+  }
+
+  .field-textarea {
+    @apply min-h-24 font-mono text-xs leading-5;
   }
 
   .checkbox-field {

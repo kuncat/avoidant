@@ -93,6 +93,10 @@ pub struct GameOptions {
     num_cells: u64,
     rng_seed: u64,
     #[tsify(optional)]
+    #[serde(default)]
+    /** Iroh relay server URLs to use for peer discovery and transport. */
+    relay_urls: Option<Vec<String>>,
+    #[tsify(optional)]
     max_samples: Option<f64>,
     #[tsify(optional)]
     slack: Option<f64>,
@@ -240,6 +244,7 @@ pub struct GameState {
     network_channel: Option<net::Channel>,
     network_listener_started: bool,
     game_options_json: String,
+    relay_urls: Vec<String>,
     elevation_min: f64,
     elevation_max: f64,
     void_fraction: f64,

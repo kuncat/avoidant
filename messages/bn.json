@@ -19,8 +19,11 @@
   "field_invitation_url": "আমন্ত্রণ URL",
   "field_map_size": "ম্যাপের আকার",
   "field_player_name": "খেলোয়াড়ের নাম",
+  "field_relay_servers": "Iroh রিলে সার্ভার",
+  "field_seed": "RNG সিড",
   "field_size": "আকার",
   "field_ticket_or_invitation_url": "টিকিট বা আমন্ত্রণ URL",
+  "label_advanced_settings": "উন্নত সেটিংস",
   "label_players": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -63,5 +66,6 @@
   "status_joining_game": "গেমে যোগ দেওয়া হচ্ছে...",
   "status_loading": "লোড হচ্ছে...",
   "status_preparing": "প্রস্তুত হচ্ছে...",
-  "text_avoided": "এড়ানো গেছে!"
+  "text_avoided": "এড়ানো গেছে!",
+  "text_relay_servers_hint": "প্রতি লাইনে একটি রিলে সার্ভার URL লিখুন।"
 }

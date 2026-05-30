@@ -28,9 +28,11 @@
   "field_invitation_url": "Invitation URL",
   "field_map_size": "Map Size",
   "field_player_name": "Player Name",
+  "field_relay_servers": "Iroh Relay Servers",
   "field_seed": "RNG Seed",
   "field_size": "Size",
   "field_ticket_or_invitation_url": "Ticket or Invitation URL",
+  "label_advanced_settings": "Advanced Settings",
   "label_players": [
     {
       "declarations": ["input count", "local countPlural = count: plural"],
@@ -73,5 +75,6 @@
   "status_joining_game": "Joining game...",
   "status_loading": "Loading...",
   "status_preparing": "Preparing...",
-  "text_avoided": "Avoided!"
+  "text_avoided": "Avoided!",
+  "text_relay_servers_hint": "Enter one relay server URL per line."
 }

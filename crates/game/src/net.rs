@@ -33,7 +33,9 @@ pub struct NetworkNode(networking::Node);
 impl NetworkNode {
     /// Spawns a gossip node.
     pub async fn spawn() -> Result<Self, JsError> {
-        let inner = networking::Node::spawn(None).await.map_err(to_js_err)?;
+        let inner = networking::Node::spawn(None, Vec::new())
+            .await
+            .map_err(to_js_err)?;
         Ok(Self(inner))
     }
 
@@ -93,6 +95,15 @@ impl NetworkNode {
             receiver,
         };
         Ok(topic)
+    }
+}
+
+impl NetworkNode {
+    pub async fn spawn_with_relay_urls(relay_urls: Vec<String>) -> Result<Self, JsError> {
+        let inner = networking::Node::spawn(None, relay_urls)
+            .await
+            .map_err(to_js_err)?;
+        Ok(Self(inner))
     }
 }
 

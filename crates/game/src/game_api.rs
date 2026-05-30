@@ -26,6 +26,7 @@ impl GameState {
         let options_json = JSON::stringify(&options_value)?
             .as_string()
             .ok_or_else(|| JsValue::from_str("Failed to serialize game options"))?;
+        let relay_urls = options.relay_urls.clone().unwrap_or_default();
         let elevation_min = options.elevation_min.unwrap_or(-0.4);
         let elevation_max = options.elevation_max.unwrap_or(0.4);
         let void_fraction = options.void_fraction.unwrap_or(0.15625).clamp(0.0, 1.0);
@@ -61,6 +62,7 @@ impl GameState {
             network_channel: None,
             network_listener_started: false,
             game_options_json: options_json,
+            relay_urls,
         })
     }
 
@@ -239,7 +241,9 @@ impl GameState {
     #[wasm_bindgen(js_name = "invite")]
     pub async fn invite(&mut self, nickname: String) -> Result<String, JsValue> {
         if self.network_node.is_none() {
-            let node = NetworkNode::spawn().await.map_err(Into::<JsValue>::into)?;
+            let node = NetworkNode::spawn_with_relay_urls(self.relay_urls.clone())
+                .await
+                .map_err(Into::<JsValue>::into)?;
             self.network_node = Some(node);
         }
 
@@ -291,7 +295,9 @@ impl GameState {
     /// only concerns itself with bringing the network layer online.
     #[wasm_bindgen(js_name = "joinAsPeer")]
     pub async fn join_as_peer(&mut self, ticket: String, nickname: String) -> Result<(), JsValue> {
-        let node = NetworkNode::spawn().await.map_err(Into::<JsValue>::into)?;
+        let node = NetworkNode::spawn_with_relay_urls(self.relay_urls.clone())
+            .await
+            .map_err(Into::<JsValue>::into)?;
         let channel = node
             .join(ticket, nickname)
             .await
