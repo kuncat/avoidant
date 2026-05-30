@@ -20,7 +20,8 @@ pub(crate) fn generate_map_cells(
 ) -> Result<Vec<MapCell>, String> {
     let points = sample_points(requested_cell_count, rng_seed, max_samples, slack)?;
 
-    let Some(diagram) = VoronoiDiagram::<Point>::from_tuple(&(0.0, 0.0), &(MAP_WIDTH, MAP_HEIGHT), &points)
+    let Some(diagram) =
+        VoronoiDiagram::<Point>::from_tuple(&(0.0, 0.0), &(MAP_WIDTH, MAP_HEIGHT), &points)
     else {
         return Err(format!(
             "Voronoi generation failed: size/seed combo isn't viable (numCells={}, rngSeed={})",

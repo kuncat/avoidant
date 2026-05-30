@@ -1,11 +1,11 @@
 [package]
-authors = ["Alvin Ali Khaled <aakside@gmail.com>"]
+authors = ["Alvin Ali Khaled <aak@kuncat.com>"]
 description = "The networking code for Avoidant."
 edition = "2024"
 license = "MIT OR Apache-2.0"
 name = "networking"
 publish = false
-repository = "https://github.com/aakside/avoidant"
+repository = "https://github.com/kuncat/avoidant"
 version = "0.1.0"
 
 [lib]
