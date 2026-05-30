@@ -1,4 +1,77 @@
 {
   "$schema": "https://inlang.com/schema/inlang-message-format",
-  "hello_world": "Hello, {name} from en!"
+  "action_back": "Back",
+  "action_copy": "Copy",
+  "action_exit": "Exit",
+  "action_invite": "Invite",
+  "action_join": "Join",
+  "action_join_game": "Join Game",
+  "action_new_game": "New Game",
+  "action_start": "Start",
+  "aria_close_invitation": "Close invitation",
+  "aria_score_summary": "Score summary",
+  "cells_count": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "match": {
+        "countPlural=one": "{count} cell",
+        "countPlural=other": "{count} cells"
+      },
+      "selectors": ["countPlural"]
+    }
+  ],
+  "default_player_name": "Player",
+  "error_join_connect_failed": "Could not connect to the game. The invitation may have expired or the host may be offline.",
+  "error_join_failed": "Failed to join the game.",
+  "error_join_ticket_invalid": "That invitation link or ticket is not valid.",
+  "error_join_ticket_required": "Enter a ticket or invitation URL to join a game.",
+  "field_invitation_url": "Invitation URL",
+  "field_map_size": "Map Size",
+  "field_player_name": "Player Name",
+  "field_seed": "RNG Seed",
+  "field_size": "Size",
+  "field_ticket_or_invitation_url": "Ticket or Invitation URL",
+  "label_players": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "match": {
+        "countPlural=one": "Player",
+        "countPlural=other": "Players"
+      },
+      "selectors": ["countPlural"]
+    }
+  ],
+  "label_safe_cells_explored": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "match": {
+        "countPlural=one": "Safe Cell Explored",
+        "countPlural=other": "Safe Cells Explored"
+      },
+      "selectors": ["countPlural"]
+    }
+  ],
+  "label_safe_cells_remaining": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "match": {
+        "countPlural=one": "Safe Cell Remaining",
+        "countPlural=other": "Safe Cells Remaining"
+      },
+      "selectors": ["countPlural"]
+    }
+  ],
+  "label_score": "Score",
+  "label_streak": "streak",
+  "label_voids_discovered": "Voids Discovered",
+  "preset_custom": "Custom",
+  "preset_large": "Large",
+  "preset_medium": "Medium",
+  "preset_small": "Small",
+  "status_generating_map": "Generating map...",
+  "status_initialization_failed": "Failed to initialize wasm.",
+  "status_joining_game": "Joining game...",
+  "status_loading": "Loading...",
+  "status_preparing": "Preparing...",
+  "text_avoided": "Avoided!"
 }

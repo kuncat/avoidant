@@ -1,0 +1,67 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "action_back": "ফিরে যান",
+  "action_copy": "কপি",
+  "action_exit": "বেরিয়ে যান",
+  "action_invite": "আমন্ত্রণ",
+  "action_join": "যোগ দিন",
+  "action_join_game": "গেমে যোগ দিন",
+  "action_new_game": "নতুন গেম",
+  "action_start": "শুরু করুন",
+  "aria_close_invitation": "আমন্ত্রণ বন্ধ করুন",
+  "aria_score_summary": "স্কোরের সারাংশ",
+  "cells_count": "{count} সেল",
+  "default_player_name": "খেলোয়াড়",
+  "error_join_connect_failed": "গেমে সংযোগ করা যায়নি। আমন্ত্রণটির মেয়াদ শেষ হয়ে থাকতে পারে বা হোস্ট অফলাইনে থাকতে পারে।",
+  "error_join_failed": "গেমে যোগ দিতে ব্যর্থ হয়েছে।",
+  "error_join_ticket_invalid": "এই আমন্ত্রণ লিঙ্ক বা টিকিটটি বৈধ নয়।",
+  "error_join_ticket_required": "গেমে যোগ দিতে একটি টিকিট বা আমন্ত্রণ URL লিখুন।",
+  "field_invitation_url": "আমন্ত্রণ URL",
+  "field_map_size": "ম্যাপের আকার",
+  "field_player_name": "খেলোয়াড়ের নাম",
+  "field_size": "আকার",
+  "field_ticket_or_invitation_url": "টিকিট বা আমন্ত্রণ URL",
+  "label_players": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "match": {
+        "countPlural=one": "খেলোয়াড়",
+        "countPlural=other": "খেলোয়াড়রা"
+      },
+      "selectors": ["countPlural"]
+    }
+  ],
+  "label_safe_cells_explored": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "match": {
+        "countPlural=one": "অনুসন্ধান করা নিরাপদ সেল",
+        "countPlural=other": "অনুসন্ধান করা নিরাপদ সেল"
+      },
+      "selectors": ["countPlural"]
+    }
+  ],
+  "label_safe_cells_remaining": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "match": {
+        "countPlural=one": "অবশিষ্ট নিরাপদ সেল",
+        "countPlural=other": "অবশিষ্ট নিরাপদ সেল"
+      },
+      "selectors": ["countPlural"]
+    }
+  ],
+  "label_score": "স্কোর",
+  "label_streak": "ধারা",
+  "label_voids_discovered": "আবিষ্কৃত শূন্যস্থান",
+  "preset_custom": "কাস্টম",
+  "preset_large": "বড়",
+  "preset_medium": "মাঝারি",
+  "preset_small": "ছোট",
+  "status_generating_map": "ম্যাপ তৈরি হচ্ছে...",
+  "status_initialization_failed": "Wasm চালু করতে ব্যর্থ হয়েছে।",
+  "status_joining_game": "গেমে যোগ দেওয়া হচ্ছে...",
+  "status_loading": "লোড হচ্ছে...",
+  "status_preparing": "প্রস্তুত হচ্ছে...",
+  "text_avoided": "এড়ানো গেছে!"
+}

@@ -7,6 +7,8 @@
   import { MOUSE } from "three";
   import Board from "$lib/components/board.svelte";
   import { MAP_HEIGHT, MAP_WIDTH } from "$lib/generated/shared-constants";
+  import { m } from "$lib/paraglide/messages";
+  import { getLocale, locales, setLocale } from "$lib/paraglide/runtime";
   import { generateMap } from "$lib/workers/mapgen-client";
 
   const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
@@ -30,13 +32,21 @@
   ];
 
   type SizePreset = keyof typeof SIZE_PRESETS | "custom";
+  type Locale = (typeof locales)[number];
+
+  const localeLabels: Record<Locale, string> = {
+    en: "English",
+    bn: "বাংলা",
+  };
 
   let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
   let terrain = $state<MapData["terrain"] | undefined>(undefined);
   let numCellsInput = $state(SIZE_PRESETS.medium);
   let rngSeedInput = $state(0);
-  let playerNameInput = $state(localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? "Player");
+  let playerNameInput = $state(
+    localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? m.default_player_name(),
+  );
   let isTutorialMode = $state(false);
   let tutorialText = $state("");
   let setupMode: "host" | "join" | undefined = $state(undefined);
@@ -143,7 +153,7 @@
 
     const initializeWasm = async () => {
       try {
-        status = "Loading...";
+        status = m.status_loading();
         await init();
         status = undefined;
 
@@ -155,7 +165,7 @@
           setupMode = "join";
         }
       } catch (error) {
-        status = "Failed to initialize wasm.";
+        status = m.status_initialization_failed();
         console.error("Failed to initialize wasm", error);
       }
     };
@@ -211,11 +221,41 @@
     return cells;
   }
 
-  const presetIcons: { value: SizePreset; label: string; cells: string[] | null }[] = [
-    { value: "small", label: "Small", cells: hexCells(11) },
-    { value: "medium", label: "Medium", cells: hexCells(7) },
-    { value: "large", label: "Large", cells: hexCells(4.5) },
-    { value: "custom", label: "Custom", cells: null },
+  type PresetIcon = {
+    value: SizePreset;
+    cells: string[] | null;
+    readonly label: string;
+  };
+
+  const presetIcons: PresetIcon[] = [
+    {
+      value: "small",
+      cells: hexCells(11),
+      get label() {
+        return m.preset_small();
+      },
+    },
+    {
+      value: "medium",
+      cells: hexCells(7),
+      get label() {
+        return m.preset_medium();
+      },
+    },
+    {
+      value: "large",
+      cells: hexCells(4.5),
+      get label() {
+        return m.preset_large();
+      },
+    },
+    {
+      value: "custom",
+      cells: null,
+      get label() {
+        return m.preset_custom();
+      },
+    },
   ];
 
   async function startGame() {
@@ -229,7 +269,7 @@
         rngSeed: $state.snapshot(rngSeedInput),
         spikiness: 0.8,
       };
-      status = "Generating map...";
+      status = m.status_generating_map();
       gameState = new GameState(options);
       const generated = await generateMap(options);
       gameState.applyMapCells(generated.cells);
@@ -262,23 +302,23 @@
     joinError = undefined;
     let succeeded = false;
     try {
-      status = "Joining game...";
+      status = m.status_joining_game();
       const ticket = extractTicket(ticketInput);
       if (!ticket) {
-        throw new Error("Enter a ticket or invitation URL to join a game.");
+        throw new Error(m.error_join_ticket_required());
       }
       let options: GameOptions;
       try {
         options = GameState.optionsFromTicket(ticket);
       } catch (error) {
         console.error("Failed to parse ticket", error);
-        throw new Error("That invitation link or ticket is not valid.", { cause: error });
+        throw new Error(m.error_join_ticket_invalid(), { cause: error });
       }
       const nextGameState = new GameState(options);
-      status = "Generating map...";
+      status = m.status_generating_map();
       const generated = await generateMap(options);
       nextGameState.applyMapCells(generated.cells);
-      status = "Joining game...";
+      status = m.status_joining_game();
       try {
         await nextGameState.joinAsPeer(ticket, playerNameInput);
       } catch (error) {
@@ -288,10 +328,7 @@
         } catch (freeError) {
           console.error("Failed to release game state", freeError);
         }
-        throw new Error(
-          "Could not connect to the game. The invitation may have expired or the host may be offline.",
-          { cause: error },
-        );
+        throw new Error(m.error_join_connect_failed(), { cause: error });
       }
       gameState = nextGameState;
       terrain = generated.terrain;
@@ -299,7 +336,7 @@
       succeeded = true;
     } catch (error) {
       console.error("Failed to join game", error);
-      joinError = error instanceof Error ? error.message : "Failed to join the game.";
+      joinError = error instanceof Error ? error.message : m.error_join_failed();
     } finally {
       status = undefined;
       if (succeeded) {
@@ -387,7 +424,7 @@
           <div
             class="relative text-sm text-slate-600"
             role="group"
-            aria-label="Score summary"
+            aria-label={m.aria_score_summary()}
             onmouseenter={() => (isScoreBreakdownHovered = true)}
             onmouseleave={() => (isScoreBreakdownHovered = false)}
           >
@@ -402,13 +439,13 @@
               onblur={() => (isScoreBreakdownHovered = false)}
               onkeydown={handleScoreSummaryKeydown}
             >
-              Score: <strong class="text-slate-200!">{Math.round($score.score)}</strong>
+              {m.label_score()}: <strong class="text-slate-200!">{Math.round($score.score)}</strong>
               <span class="opacity-70">({Math.round($score.efficiency * 100)}%)</span>
               {#if $score.completed}
-                <span class="font-semibold text-emerald-600!">Avoided!</span>
+                <span class="font-semibold text-emerald-600!">{m.text_avoided()}</span>
               {:else}
                 <span class="opacity-80">
-                  Safe Cells Remaining:
+                  {m.label_safe_cells_remaining({ count: numSafeUnexploredCells })}:
                   <strong class="text-slate-200!">{numSafeUnexploredCells}</strong>
                 </span>
               {/if}
@@ -418,15 +455,17 @@
               <div id="score-breakdown" class="score-breakdown" role="status">
                 {#if $score.streak > 1}<p>
                     <span class="opacity-70"
-                      >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)} streak</span
+                      >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)}
+                      {m.label_streak()}</span
                     >
                   </p>
                 {/if}
                 <p class="text-emerald-600!">
-                  Safe Cells Explored: <strong>{$score.safeExplored}</strong>
+                  {m.label_safe_cells_explored({ count: $score.safeExplored })}:
+                  <strong>{$score.safeExplored}</strong>
                 </p>
                 <p class="text-rose-500!">
-                  Voids Discovered: <strong>{$score.voidExplored}</strong>
+                  {m.label_voids_discovered()}: <strong>{$score.voidExplored}</strong>
                 </p>
               </div>
             {/if}
@@ -434,7 +473,8 @@
         {/if}
         <div class="ml-auto text-sm text-slate-200!">
           {#if connectedPeerCount > 0}
-            Players: <strong>{connectedPeerCount + 1}</strong>
+            {m.label_players({ count: connectedPeerCount + 1 })}:
+            <strong>{connectedPeerCount + 1}</strong>
           {/if}
         </div>
         <div class="flex gap-2">
@@ -447,13 +487,13 @@
             >
               {#if isGeneratingInvite}
                 <span class="spinner" aria-hidden="true"></span>
-                <span>Preparing…</span>
+                <span>{m.status_preparing()}</span>
               {:else}
-                Invite
+                {m.action_invite()}
               {/if}
             </button>
           {/if}
-          <button class="btn btn-danger" type="button" onclick={exitGame}>Exit</button>
+          <button class="btn btn-danger" type="button" onclick={exitGame}>{m.action_exit()}</button>
         </div>
       {/if}
     </div>
@@ -474,11 +514,11 @@
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
             <div class="mb-4 w-full px-3">
-              <label class="field-label" for="player-name">Player Name</label>
+              <label class="field-label" for="player-name">{m.field_player_name()}</label>
               <input class="field" id="player-name" type="text" bind:value={playerNameInput} />
             </div>
             <div class="mb-4 w-full px-3">
-              <span class="field-label">Map Size</span>
+              <span class="field-label">{m.field_map_size()}</span>
               <div class="grid grid-cols-4 gap-2">
                 {#each presetIcons as preset (preset.value)}
                   <button
@@ -524,9 +564,9 @@
                     <span class="preset-count">
                       {preset.value === "custom"
                         ? sizePreset === "custom"
-                          ? `${numCellsInput} cells`
+                          ? m.cells_count({ count: numCellsInput })
                           : ""
-                        : `${SIZE_PRESETS[preset.value]} cells`}
+                        : m.cells_count({ count: SIZE_PRESETS[preset.value] })}
                     </span>
                   </button>
                 {/each}
@@ -536,7 +576,7 @@
               <div class="w-full px-3" transition:slide={{ duration: 180 }}>
                 <div class="-mx-3 flex flex-wrap">
                   <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-                    <label class="field-label" for="grid-first-name">Size</label>
+                    <label class="field-label" for="grid-first-name">{m.field_size()}</label>
                     <input
                       class="field"
                       id="grid-first-name"
@@ -549,7 +589,7 @@
                     />
                   </div>
                   <div class="w-full px-3 md:w-1/2">
-                    <label class="field-label" for="grid-last-name">Seed</label>
+                    <label class="field-label" for="grid-last-name">{m.field_seed()}</label>
                     <input
                       class="field"
                       id="grid-last-name"
@@ -569,9 +609,9 @@
           </div>
           <div class="flex flex-wrap justify-center gap-2">
             <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
-              Back
+              {m.action_back()}
             </button>
-            <button class="btn btn-primary" type="submit">Start</button>
+            <button class="btn btn-primary" type="submit">{m.action_start()}</button>
           </div>
         </form>
       {:else if setupMode === "join"}
@@ -585,11 +625,13 @@
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label class="field-label" for="join-player-name">Player Name</label>
+              <label class="field-label" for="join-player-name">{m.field_player_name()}</label>
               <input class="field" id="join-player-name" type="text" bind:value={playerNameInput} />
             </div>
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label class="field-label" for="grid-first-name">Ticket or Invitation URL</label>
+              <label class="field-label" for="grid-first-name"
+                >{m.field_ticket_or_invitation_url()}</label
+              >
               <input
                 class="field"
                 id="grid-first-name"
@@ -613,29 +655,47 @@
                 joinError = undefined;
               }}
             >
-              Back
+              {m.action_back()}
             </button>
-            <button class="btn btn-primary" type="submit">Join</button>
+            <button class="btn btn-primary" type="submit">{m.action_join()}</button>
           </div>
         </form>
       {:else}
         <div class="mt-4 flex flex-wrap justify-center gap-2" transition:slide={{ duration: 220 }}>
           <button class="btn btn-primary" type="button" onclick={() => (setupMode = "host")}>
-            New Game
+            {m.action_new_game()}
           </button>
           <button class="btn btn-primary" type="button" onclick={() => (setupMode = "join")}>
-            Join Game
+            {m.action_join_game()}
           </button>
+        </div>
+        <div class="mt-4 flex justify-center" transition:slide={{ duration: 180 }}>
+          <label class="sr-only" for="language-select">Language</label>
+          <select
+            id="language-select"
+            class="locale-select min-w-1/2"
+            value={getLocale()}
+            aria-label="Language"
+            onchange={(event) => {
+              setLocale((event.currentTarget as HTMLSelectElement).value as Locale);
+            }}
+          >
+            {#each locales as locale (locale)}
+              <option value={locale}
+                >{localeLabels[locale] ? `${localeLabels[locale]} (${locale})` : locale}</option
+              >
+            {/each}
+          </select>
         </div>
       {/if}
     {:else if inviteTicket}
       <div class="mt-3" transition:slide={{ duration: 200 }}>
         <div class="mb-2 flex items-center justify-between gap-2">
-          <label class="field-label mb-0" for="invite-ticket">Invitation URL</label>
+          <label class="field-label mb-0" for="invite-ticket">{m.field_invitation_url()}</label>
           <button
             class="icon-btn"
             type="button"
-            aria-label="Close invitation"
+            aria-label={m.aria_close_invitation()}
             onclick={() => (inviteTicket = "")}
           >
             ×
@@ -649,7 +709,9 @@
             readonly
             value={inviteUrl}
           />
-          <button class="btn btn-secondary" type="button" onclick={copyInviteTicket}> Copy </button>
+          <button class="btn btn-secondary" type="button" onclick={copyInviteTicket}>
+            {m.action_copy()}
+          </button>
         </div>
       </div>
     {/if}
@@ -827,5 +889,9 @@
 
   .spinner {
     @apply mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white;
+  }
+
+  .locale-select {
+    @apply rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs text-slate-700 focus:border-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400;
   }
 </style>
