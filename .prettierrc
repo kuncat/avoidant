@@ -16,7 +16,7 @@
   "plugins": ["prettier-plugin-svelte", "prettier-plugin-tailwindcss", "prettier-plugin-glsl"],
   "printWidth": 100,
   "singleQuote": false,
-  "tailwindStylesheet": "./src/routes/layout.css",
+  "tailwindStylesheet": "./src/lib/styles/global.css",
   "trailingComma": "all",
   "useTabs": false
 }
