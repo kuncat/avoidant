@@ -478,7 +478,7 @@
           {/if}
         </div>
         <div class="flex gap-2">
-          {#if !$score?.completed}
+          {#if ($score?.safeExplored ?? 0) + ($score?.voidExplored ?? 0) === 0}
             <button
               class="btn btn-primary"
               type="button"
