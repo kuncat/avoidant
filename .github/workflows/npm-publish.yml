@@ -7,8 +7,13 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish-npm:
+    environment: npm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,5 +31,3 @@ jobs:
       - run: npm ci
       - run: npm run prepack
       - run: npm publish --ignore-scripts --access public
-        env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
