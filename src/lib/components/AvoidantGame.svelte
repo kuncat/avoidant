@@ -533,14 +533,26 @@
               onblur={() => (isScoreBreakdownHovered = false)}
               onkeydown={handleScoreSummaryKeydown}
             >
-              {m.label_score()}: <strong class="text-slate-200!">{Math.round($score.score)}</strong>
-              <span class="opacity-70">({Math.round($score.efficiency * 100)}%)</span>
+              {m.label_score()}:
+              <strong class="text-slate-200!"
+                >{Math.round($score.score).toLocaleString(getLocale())}</strong
+              >
+              <span class="opacity-70"
+                >({$score.efficiency.toLocaleString(getLocale(), {
+                  maximumFractionDigits: 0,
+                  style: "percent",
+                })})</span
+              >
               {#if $score.completed}
                 <span class="font-semibold text-emerald-600!">{m.text_avoided()}</span>
               {:else}
                 <span class="opacity-80">
-                  {m.label_safe_cells_remaining({ count: numSafeUnexploredCells })}:
-                  <strong class="text-slate-200!">{numSafeUnexploredCells}</strong>
+                  {m.label_safe_cells_remaining({
+                    count: numSafeUnexploredCells.toLocaleString(getLocale()),
+                  })}:
+                  <strong class="text-slate-200!"
+                    >{numSafeUnexploredCells.toLocaleString(getLocale())}</strong
+                  >
                 </span>
               {/if}
             </div>
@@ -549,17 +561,22 @@
               <div id="score-breakdown" class="score-breakdown" role="status">
                 {#if $score.streak > 1}<p>
                     <span class="opacity-70"
-                      >×{(1 + Math.min($score.streak, 10) * 0.1).toFixed(1)}
+                      >×{(1 + Math.min($score.streak, 10) * 0.1).toLocaleString(getLocale(), {
+                        maximumFractionDigits: 1,
+                      })}
                       {m.label_streak()}</span
                     >
                   </p>
                 {/if}
                 <p class="text-emerald-600!">
-                  {m.label_safe_cells_explored({ count: $score.safeExplored })}:
-                  <strong>{$score.safeExplored}</strong>
+                  {m.label_safe_cells_explored({
+                    count: $score.safeExplored.toLocaleString(getLocale()),
+                  })}:
+                  <strong>{$score.safeExplored.toLocaleString(getLocale())}</strong>
                 </p>
                 <p class="text-rose-500!">
-                  {m.label_voids_discovered()}: <strong>{$score.voidExplored}</strong>
+                  {m.label_voids_discovered()}:
+                  <strong>{$score.voidExplored.toLocaleString(getLocale())}</strong>
                 </p>
               </div>
             {/if}

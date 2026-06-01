@@ -1,5 +1,6 @@
 import type { CellMetadataEntry, MapCell } from "$lib/wasm/avoidant_wasm";
 import { m } from "$lib/paraglide/messages";
+import { getLocale } from "./paraglide/runtime";
 
 export type TutorialPhase =
   | { kind: "intro" }
@@ -26,7 +27,9 @@ export class TutorialState {
       case "afterSafeDeducible":
         return m.tutorial_after_safe_deducible();
       case "won":
-        return m.tutorial_won({ percent: Math.round(this.phase.efficiency * 100) });
+        return m.tutorial_won({
+          percent: Math.round(this.phase.efficiency * 100).toLocaleString(getLocale()),
+        });
       case "done":
         return "";
     }
