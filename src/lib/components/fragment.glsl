@@ -17,6 +17,8 @@ uniform float pulseMaxRadii[MAX_PULSES];
 uniform vec3 uLightDir;
 uniform float uAmbient;
 uniform float uDiffuse;
+uniform float uHighlightedCell;
+uniform float uTime;
 
 float remapClamped(float value, float inMin, float inMax, float outMin, float outMax) {
   float t = clamp((value - inMin) / (inMax - inMin), 0.0, 1.0);
@@ -87,6 +89,13 @@ void main() {
     step(0.0001, totalRing) * clamp(remoteRing / (totalRing + 0.00001), 0.0, 1.0);
   vec3 pulseTint = mix(localPulseTint, remotePulseTint, remoteFactor);
   vec3 finalColor = mix(terrainColor, pulseTint, totalRing * 0.85);
+
+  // Pulsing glow for a tutorial-highlighted cell. `uHighlightedCell` is -1 when no cell is highlighted.
+  if (uHighlightedCell >= 0.0 && abs(vCellIndex - uHighlightedCell) < 0.5) {
+    float glowPulse = 0.5 + 0.5 * sin(uTime * 0.005);
+    vec3 glowColor = vec3(0.4745, 0.8667, 0.6706);
+    finalColor = mix(finalColor, glowColor, 0.35 + 0.45 * glowPulse);
+  }
 
   float alpha = isExplored > 0.5 ? 1.0 : 0.25;
   // Fade alpha while an explored void cell is falling.

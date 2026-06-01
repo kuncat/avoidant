@@ -32,6 +32,7 @@
   "field_seed": "RNG Seed",
   "field_size": "Size",
   "field_ticket_or_invitation_url": "Ticket or Invitation URL",
+  "field_tutorial_mode": "Tutorial Mode",
   "field_void_fraction": "Void Cell Fraction",
   "label_advanced_settings": "Advanced Settings",
   "label_players": [
@@ -77,5 +78,13 @@
   "status_loading": "Loading...",
   "status_preparing": "Preparing...",
   "text_avoided": "Avoided!",
-  "text_relay_servers_hint": "Enter one relay server URL per line."
+  "text_relay_servers_hint": "Enter one relay server URL per line.",
+  "tutorial_action_dismiss": "Dismiss",
+  "tutorial_action_next": "Next",
+  "tutorial_after_safe_deducible": "Nice! That cell was safe, and the numbers around it let you deduce another safe cell. The highlighted cell is provably safe. Feel free to press it next.",
+  "tutorial_after_safe_guess": "Nice, that cell was safe. Pick another cell.",
+  "tutorial_after_void": "That was a void! Voids are the cells you want to avoid and pressing each one ends your streak and deducts points. Click another cell to keep exploring.",
+  "tutorial_awaiting_first_click": "The map is now interactive. Press any cell to reveal it and remember your goal is to avoid pressing \"void\" cells. Each safe cell with any void neighbors shows a number indicating how many of their neighbours are voids. As you explore the map, use that information to try to deduce which cells are safe and which are void. Good luck!",
+  "tutorial_intro": "Welcome to Avoidant. Take a moment to get familiar with moving the camera around: on a touchscreen, one-finger dragging will pan the map, and two fingers will let you rotate and zoom. With a mouse, drag with the left mouse button to pan, drag with the right mouse button to rotate, and scroll to zoom. With a trackpad, holding shift while dragging lets you rotate. When you're comfortable with the controls, press Next to start exploring cells.",
+  "tutorial_won": "Congratulations, you found every non-void cell! Your efficiency was {percent}%. Efficiency compares your score to the maximum possible score on this map: 100% means you only ever clicked safe cells."
 }

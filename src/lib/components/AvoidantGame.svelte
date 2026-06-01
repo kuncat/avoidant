@@ -1,15 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { slide } from "svelte/transition";
+  import { SvelteSet } from "svelte/reactivity";
   import init, { GameState, type GameOptions, type MapData } from "$lib/wasm/avoidant_wasm";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
-  import { MOUSE } from "three";
+  import { MOUSE, TOUCH } from "three";
   import Board from "$lib/components/board.svelte";
   import { MAP_HEIGHT, MAP_WIDTH } from "$lib/generated/shared-constants";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, locales, setLocale } from "$lib/paraglide/runtime";
   import { generateMap } from "$lib/workers/mapgen-client";
+  import { TutorialState } from "$lib/tutorial.svelte";
 
   const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
   const SIZE_PRESETS = { small: 80, medium: 160, large: 320 } as const;
@@ -75,7 +77,9 @@
       : m.default_player_name(),
   );
   let isTutorialMode = $state(false);
-  let tutorialText = $state("");
+  let tutorial = $state<TutorialState | undefined>(undefined);
+  let exploredCellsSeen = new SvelteSet<number>();
+  let pendingTutorialClick = $state<number | undefined>(undefined);
   let setupMode: "host" | "join" | undefined = $state(undefined);
   let sizePreset = $state<SizePreset>("medium");
   let isAdvancedSettingsOpen = $state(false);
@@ -93,6 +97,9 @@
   let isGeneratingInvite = $state(false);
   let networkSnapshot = $derived(gameState?.networkSnapshot);
   let score = $derived(gameState?.score);
+  let cellMetadataStore = $derived(gameState?.cellMetadata);
+  let cellsStore = $derived(gameState?.cells);
+  let pulsesStore = $derived(gameState?.uiState?.pulses);
   let numSafeUnexploredCells = $derived(
     $score ? Math.max(0, $score.totalCells - $score.voidTotal - $score.safeExplored) : 0,
   );
@@ -244,6 +251,31 @@
     if (sizePreset === "custom") isTutorialMode = false;
   });
 
+  $effect(() => {
+    if (!tutorial || !$cellMetadataStore || !$cellsStore) return;
+    const metadata = $cellMetadataStore;
+    // Track every newly-explored cell immediately so we don't backfill later, but defer the tutorial state transition until any chord/flood pulses have settled — otherwise we'd announce the result and highlight the next safe cell mid-sweep.
+    for (let i = 0; i < metadata.length; i++) {
+      if (metadata[i].isExplored && !exploredCellsSeen.has(i)) {
+        exploredCellsSeen.add(i);
+      }
+    }
+    const pulsesActive = ($pulsesStore?.length ?? 0) > 0;
+    const anyRevealing = metadata.some((entry) => entry.isRevealing);
+    if (pulsesActive || anyRevealing) return;
+    const clicked = pendingTutorialClick;
+    if (clicked === undefined) return;
+    pendingTutorialClick = undefined;
+    tutorial.observeExplore(clicked, $cellsStore, metadata);
+  });
+
+  $effect(() => {
+    if (!tutorial || !$score) return;
+    if ($score.completed) {
+      tutorial.observeWin($score.efficiency);
+    }
+  });
+
   function hexCells(radius: number): string[] {
     const cells: string[] = [];
     const dx = radius * Math.sqrt(3);
@@ -331,6 +363,9 @@
       gameState.applyMapCells(generated.cells);
       terrain = generated.terrain;
       inviteTicket = "";
+      exploredCellsSeen = new SvelteSet<number>();
+      pendingTutorialClick = undefined;
+      tutorial = isTutorialMode ? new TutorialState() : undefined;
     } catch (error) {
       console.error("Failed to start game", error);
     } finally {
@@ -416,6 +451,9 @@
     ticketInput = "";
     joinError = undefined;
     status = undefined;
+    tutorial = undefined;
+    exploredCellsSeen = new SvelteSet<number>();
+    pendingTutorialClick = undefined;
     rngSeedInput = Math.floor(Date.now() / 1000);
   }
 
@@ -710,7 +748,7 @@
               </div>
             </div>
             <div class="checkbox-field mb-4 flex w-full items-center gap-2 px-3">
-              <label class="field-label mb-0!" for="tutorial-mode">Tutorial Mode</label>
+              <label class="field-label mb-0!" for="tutorial-mode">{m.field_tutorial_mode()}</label>
               <input
                 id="tutorial-mode"
                 type="checkbox"
@@ -840,7 +878,15 @@
         far={1000}
         position={cameraPosition}
       />
-      <Board bind:gameState {terrain} />
+      <Board
+        bind:gameState
+        {terrain}
+        interactive={tutorial?.isExplorationAllowed ?? true}
+        highlightedCellIndex={tutorial?.highlightedCellIndex}
+        onCellClicked={(cellIndex) => {
+          if (tutorial) pendingTutorialClick = cellIndex;
+        }}
+      />
       <OrbitControls
         enableDamping
         enablePan={true}
@@ -848,15 +894,32 @@
         enableRotate={true}
         minPolarAngle={0}
         maxPolarAngle={Math.PI / 2}
-        target={[MAP_CENTER_X, 0, MAP_CENTER_Z]}
         mouseButtons={{ LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }}
+        target={[MAP_CENTER_X, 0, MAP_CENTER_Z]}
+        touches={{ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE }}
       />
     </Canvas>
   </div>
 {/if}
 
-{#if isTutorialMode}
-  <div class="absolute bottom-0 h-10 w-full px-4 text-slate-200">
-    {tutorialText}
+{#if tutorial && tutorial.phase.kind !== "done"}
+  <div
+    class="tutorial-panel fixed inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4"
+    transition:slide={{ duration: 180 }}
+  >
+    <div
+      class="pointer-events-auto flex w-full max-w-2xl items-start gap-3 rounded-md bg-slate-900/85 px-4 py-3 text-sm text-slate-100 shadow-lg backdrop-blur"
+    >
+      {tutorial.text}
+      {#if tutorial.canAdvance}
+        <button class="btn btn-primary" type="button" onclick={() => tutorial?.next()}>
+          {m.tutorial_action_next()}
+        </button>
+      {:else if tutorial.phase.kind === "won"}
+        <button class="btn btn-primary" type="button" onclick={() => tutorial?.dismiss()}>
+          {m.tutorial_action_dismiss()}
+        </button>
+      {/if}
+    </div>
   </div>
 {/if}

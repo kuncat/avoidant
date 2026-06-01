@@ -70,9 +70,18 @@
   interface Props {
     gameState: GameState;
     terrain?: { positions: number[]; normals: number[]; cellIndices: number[] } | undefined;
+    interactive?: boolean;
+    highlightedCellIndex?: number | undefined;
+    onCellClicked?: (cellIndex: number) => void;
   }
 
-  let { gameState = $bindable(), terrain = undefined }: Props = $props();
+  let {
+    gameState = $bindable(),
+    terrain = undefined,
+    interactive = true,
+    highlightedCellIndex = undefined,
+    onCellClicked = undefined,
+  }: Props = $props();
   let cells = $derived(gameState?.cells);
   let cellMetadata = $derived(gameState?.cellMetadata);
   let pulses = $derived(gameState?.uiState?.pulses);
@@ -84,7 +93,8 @@
       const now = performance.now();
       const hasActivePulses = $pulses.some((p) => now - p.createdAtMs < Math.max(1, p.durationMs));
       const hasFallingCells = fallStart.size > 0;
-      if (hasActivePulses || hasFallingCells) {
+      const hasHighlight = highlightedCellIndex !== undefined;
+      if (hasActivePulses || hasFallingCells || hasHighlight) {
         nowMs = now;
 
         if (hasFallingCells) {
@@ -303,6 +313,8 @@
         pulseOriginCells: { value: new Array(MAX_PULSES).fill(-1) },
         pulseIsRemote: { value: new Array(MAX_PULSES).fill(0) },
         pulseMaxRadii: { value: new Array(MAX_PULSES).fill(0) },
+        uHighlightedCell: { value: -1 },
+        uTime: { value: 0 },
       },
     }),
   );
@@ -413,15 +425,20 @@
     terrainMaterial.uniforms.pulseOriginCells.value = pulseOriginCellsUniform;
     terrainMaterial.uniforms.pulseIsRemote.value = pulseIsRemoteUniform;
     terrainMaterial.uniforms.pulseMaxRadii.value = pulseMaxRadiiUniform;
+    terrainMaterial.uniforms.uHighlightedCell.value =
+      highlightedCellIndex === undefined ? -1 : highlightedCellIndex;
+    terrainMaterial.uniforms.uTime.value = nowMs;
     invalidate();
   });
 
   function handleTerrainClick(event: { point: Vector3; face: { a: number } | null }) {
+    if (!interactive) return;
     if (!event.face || $cells.length === 0) return;
     const aCellIndexArr = terrainGeometry.attributes.aCellIndex.array as Float32Array;
     const cellIndex = aCellIndexArr[event.face.a];
     if (cellIndex === undefined) return;
     gameState.queueExplorePulse(cellIndex, event.point.x, event.point.y, event.point.z);
+    onCellClicked?.(cellIndex);
   }
 </script>
 
