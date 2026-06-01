@@ -46,8 +46,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
-  import { Pulse } from "wasm-pkg";
-  import type { GameState } from "wasm-pkg";
+  import { Pulse } from "$lib/wasm/avoidant_wasm";
+  import type { GameState } from "$lib/wasm/avoidant_wasm";
   import { T, useThrelte } from "@threlte/core";
   import { interactivity, Text, Billboard } from "@threlte/extras";
   import {

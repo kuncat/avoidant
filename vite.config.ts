@@ -46,7 +46,7 @@ export default defineConfig({
   },
   server: {
     fs: {
-      allow: ["wasm-pkg"],
+      allow: ["wasm-pkg", "dist"],
     },
   },
   worker: {

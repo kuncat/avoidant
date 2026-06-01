@@ -3,7 +3,7 @@
  *
  * A single worker is kept alive across calls so the wasm module is only initialized once. Each call gets a unique requestId so we can multiplex safely even though map generation is normally serial.
  */
-import type { GameOptions, MapData } from "wasm-pkg";
+import type { GameOptions, MapData } from "$lib/wasm/avoidant_wasm";
 import type { WorkerResponse } from "$lib/workers/mapgen.worker";
 import MapgenWorker from "$lib/workers/mapgen.worker?worker";
 

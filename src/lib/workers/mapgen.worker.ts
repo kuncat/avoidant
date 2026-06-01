@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import init, { generateMapData, type GameOptions, type MapData } from "wasm-pkg";
+import init, { generateMapData, type GameOptions, type MapData } from "$lib/wasm/avoidant_wasm";
 
 export interface GenerateMessage {
   type: "generate";
