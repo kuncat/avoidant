@@ -68,11 +68,13 @@
     "dev": "vite dev",
     "build": "npm run build:wasm && vite build",
     "build:wasm": "wasm-pack build crates/game --target web --out-dir ../../src/lib/wasm --out-name avoidant_wasm && rm -f src/lib/wasm/.gitignore",
+    "build:paraglide": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --no-emit-git-ignore --no-emit-prettier-ignore --no-emit-readme",
+    "build:package": "svelte-kit sync && svelte-package && publint",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "format": "prettier --write .",
     "lint": "prettier --check . && eslint .",
-    "prepack": "npm run build:wasm && svelte-kit sync && svelte-package && rm -f dist/paraglide/.gitignore dist/paraglide/.prettierignore && publint",
+    "prepack": "npm run build:wasm && npm run build:paraglide && npm run build:package",
     "prepare": "svelte-kit sync || echo ''",
     "preview": "vite preview",
     "test:unit": "vitest",
@@ -82,5 +84,5 @@
     "**/*.css"
   ],
   "type": "module",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
