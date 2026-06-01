@@ -136,7 +136,7 @@ h1 {
   @apply text-base leading-none text-slate-500;
 }
 
-.advanced-settings[open] .advanced-settings-summary::after {
+.advanced-settings.advanced-settings-open .advanced-settings-summary::after {
   content: "-";
 }
 

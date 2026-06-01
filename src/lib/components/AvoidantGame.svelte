@@ -78,6 +78,7 @@
   let tutorialText = $state("");
   let setupMode: "host" | "join" | undefined = $state(undefined);
   let sizePreset = $state<SizePreset>("medium");
+  let isAdvancedSettingsOpen = $state(false);
   let relayServersInput = $state("");
   let relayServersInitialized = false;
   let hasRelayServersConfigured = $derived(parseRelayServersInput(relayServersInput).length > 0);
@@ -657,37 +658,51 @@
               </div>
             {/if}
             <div class="mb-4 w-full px-3">
-              <details class="advanced-settings">
-                <summary class="advanced-settings-summary">{m.label_advanced_settings()}</summary>
-                <div class="advanced-settings-content">
-                  <label class="field-label" for="relay-servers"
-                    ><a
-                      href="https://docs.iroh.computer/deployment/dedicated-infrastructure"
-                      target="_blank"
-                      rel="noopener noreferrer">{m.field_relay_servers()}</a
-                    ></label
+              <div class="advanced-settings" class:advanced-settings-open={isAdvancedSettingsOpen}>
+                <button
+                  type="button"
+                  class="advanced-settings-summary w-full"
+                  aria-expanded={isAdvancedSettingsOpen}
+                  aria-controls="advanced-settings-content"
+                  onclick={() => (isAdvancedSettingsOpen = !isAdvancedSettingsOpen)}
+                >
+                  {m.label_advanced_settings()}
+                </button>
+                {#if isAdvancedSettingsOpen}
+                  <div
+                    id="advanced-settings-content"
+                    class="advanced-settings-content"
+                    transition:slide={{ duration: 180 }}
                   >
-                  <textarea
-                    class="field field-textarea mb-1"
-                    id="relay-servers"
-                    bind:value={relayServersInput}
-                    rows="4"
-                    spellcheck="false"
-                  ></textarea>
-                  <p class="field-help">{m.text_relay_servers_hint()}</p>
-                  <div class="mt-6 w-full">
-                    <label class="field-label" for="grid-last-name">{m.field_seed()}</label>
-                    <input
-                      class="field"
-                      id="grid-last-name"
-                      type="number"
-                      inputmode="numeric"
-                      bind:value={rngSeedInput}
-                      min="0"
-                    />
+                    <label class="field-label" for="relay-servers"
+                      ><a
+                        href="https://docs.iroh.computer/deployment/dedicated-infrastructure"
+                        target="_blank"
+                        rel="noopener noreferrer">{m.field_relay_servers()}</a
+                      ></label
+                    >
+                    <textarea
+                      class="field field-textarea mb-1"
+                      id="relay-servers"
+                      bind:value={relayServersInput}
+                      rows="4"
+                      spellcheck="false"
+                    ></textarea>
+                    <p class="field-help">{m.text_relay_servers_hint()}</p>
+                    <div class="mt-6 w-full">
+                      <label class="field-label" for="grid-last-name">{m.field_seed()}</label>
+                      <input
+                        class="field"
+                        id="grid-last-name"
+                        type="number"
+                        inputmode="numeric"
+                        bind:value={rngSeedInput}
+                        min="0"
+                      />
+                    </div>
                   </div>
-                </div>
-              </details>
+                {/if}
+              </div>
             </div>
             <!-- <div class="checkbox-field mb-4 flex w-full items-center gap-2 px-3">
               <label class="field-label mb-0!" for="tutorial-mode">Tutorial Mode</label>
