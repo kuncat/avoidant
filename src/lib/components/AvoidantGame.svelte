@@ -67,6 +67,7 @@
   let gameState = $state<GameState | undefined>(undefined);
   let terrain = $state<MapData["terrain"] | undefined>(undefined);
   let numCellsInput = $state(SIZE_PRESETS.medium);
+  let voidFractionInput = $state(0.15625);
   let rngSeedInput = $state(0);
   let playerNameInput = $state(
     typeof window !== "undefined"
@@ -302,6 +303,7 @@
     try {
       const resolvedNumCells =
         sizePreset === "custom" ? $state.snapshot(numCellsInput) : SIZE_PRESETS[sizePreset];
+      const voidFraction = sizePreset === "custom" ? $state.snapshot(voidFractionInput) : 0.15625;
       const relayUrls = parseRelayServersInput($state.snapshot(relayServersInput));
       const options: GameOptions = {
         elevationMax: 6.0,
@@ -310,6 +312,7 @@
         relayUrls: relayUrls.length > 0 ? relayUrls : undefined,
         rngSeed: $state.snapshot(rngSeedInput),
         spikiness: 0.8,
+        voidFraction: voidFraction,
       };
       status = m.status_generating_map();
       gameState = new GameState(options);
@@ -614,6 +617,39 @@
                 {/each}
               </div>
             </div>
+            {#if sizePreset === "custom"}
+              <div class="w-full px-3" transition:slide={{ duration: 180 }}>
+                <div class="-mx-3 flex flex-wrap">
+                  <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
+                    <label class="field-label" for="grid-first-name">{m.field_size()}</label>
+                    <input
+                      class="field"
+                      id="grid-first-name"
+                      type="number"
+                      inputmode="numeric"
+                      bind:value={numCellsInput}
+                      min="32"
+                      max="5000"
+                      step="1"
+                    />
+                  </div>
+                  <div class="w-full px-3 md:w-1/2">
+                    <label class="field-label" for="grid-last-name">{m.field_void_fraction()}</label
+                    >
+                    <input
+                      class="field"
+                      id="grid-last-name"
+                      type="number"
+                      inputmode="numeric"
+                      bind:value={voidFractionInput}
+                      max="0.999"
+                      min="0"
+                      step="0.001"
+                    />
+                  </div>
+                </div>
+              </div>
+            {/if}
             <div class="mb-4 w-full px-3">
               <details class="advanced-settings">
                 <summary class="advanced-settings-summary">{m.label_advanced_settings()}</summary>
@@ -633,26 +669,7 @@
                     spellcheck="false"
                   ></textarea>
                   <p class="field-help">{m.text_relay_servers_hint()}</p>
-                </div>
-              </details>
-            </div>
-            {#if sizePreset === "custom"}
-              <div class="w-full px-3" transition:slide={{ duration: 180 }}>
-                <div class="-mx-3 flex flex-wrap">
-                  <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-                    <label class="field-label" for="grid-first-name">{m.field_size()}</label>
-                    <input
-                      class="field"
-                      id="grid-first-name"
-                      type="number"
-                      inputmode="numeric"
-                      bind:value={numCellsInput}
-                      min="32"
-                      max="5000"
-                      step="1"
-                    />
-                  </div>
-                  <div class="w-full px-3 md:w-1/2">
+                  <div class="mt-6 w-full">
                     <label class="field-label" for="grid-last-name">{m.field_seed()}</label>
                     <input
                       class="field"
@@ -664,8 +681,8 @@
                     />
                   </div>
                 </div>
-              </div>
-            {/if}
+              </details>
+            </div>
             <!-- <div class="checkbox-field mb-4 flex w-full items-center gap-2 px-3">
               <label class="field-label mb-0!" for="tutorial-mode">Tutorial Mode</label>
               <input id="tutorial-mode" type="checkbox" bind:checked={isTutorialMode} />

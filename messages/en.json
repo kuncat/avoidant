@@ -32,6 +32,7 @@
   "field_seed": "RNG Seed",
   "field_size": "Size",
   "field_ticket_or_invitation_url": "Ticket or Invitation URL",
+  "field_void_fraction": "Void Cell Fraction",
   "label_advanced_settings": "Advanced Settings",
   "label_players": [
     {

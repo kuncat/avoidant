@@ -23,6 +23,7 @@
   "field_seed": "RNG সিড",
   "field_size": "আকার",
   "field_ticket_or_invitation_url": "টিকিট বা আমন্ত্রণ URL",
+  "field_void_fraction": "শূন্য সেলের অনুপাত",
   "label_advanced_settings": "উন্নত সেটিংস",
   "label_players": [
     {
