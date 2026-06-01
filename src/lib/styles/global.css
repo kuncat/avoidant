@@ -115,6 +115,10 @@ h1 {
   @apply mb-2 block text-left text-xs font-bold tracking-wide text-slate-500 uppercase;
 }
 
+.game-canvas-container > div:has(canvas) {
+  @apply h-full w-full;
+}
+
 .advanced-settings {
   @apply rounded border border-slate-300 bg-slate-100;
 }
