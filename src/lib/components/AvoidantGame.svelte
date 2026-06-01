@@ -783,7 +783,7 @@
 </div>
 
 {#if gameState}
-  <div style="height: 100vh; width: 100%;">
+  <div id="game-canvas-container" style="height: 100vh; width: 100%;">
     <Canvas colorSpace="srgb-linear">
       <T.OrthographicCamera
         makeDefault
