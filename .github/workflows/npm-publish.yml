@@ -25,6 +25,6 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - run: npm ci
       - run: npm run prepack
-      - run: npm publish --ignore-scripts
+      - run: npm publish --ignore-scripts --access public
         env:
           NODE_AUTH_TOKEN: ${{secrets.npm_token}}
