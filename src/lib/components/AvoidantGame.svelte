@@ -240,6 +240,10 @@
     }
   });
 
+  $effect(() => {
+    if (sizePreset === "custom") isTutorialMode = false;
+  });
+
   function hexCells(radius: number): string[] {
     const cells: string[] = [];
     const dx = radius * Math.sqrt(3);
@@ -628,10 +632,10 @@
               <div class="w-full px-3" transition:slide={{ duration: 180 }}>
                 <div class="-mx-3 flex flex-wrap">
                   <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-                    <label class="field-label" for="grid-first-name">{m.field_size()}</label>
+                    <label class="field-label" for="size-input">{m.field_size()}</label>
                     <input
                       class="field"
-                      id="grid-first-name"
+                      id="size-input"
                       type="number"
                       inputmode="numeric"
                       bind:value={numCellsInput}
@@ -641,11 +645,12 @@
                     />
                   </div>
                   <div class="w-full px-3 md:w-1/2">
-                    <label class="field-label" for="grid-last-name">{m.field_void_fraction()}</label
-                    >
+                    <label class="field-label" for="void-fraction-input">
+                      {m.field_void_fraction()}
+                    </label>
                     <input
                       class="field"
-                      id="grid-last-name"
+                      id="void-fraction-input"
                       type="number"
                       inputmode="numeric"
                       bind:value={voidFractionInput}
@@ -690,10 +695,10 @@
                     ></textarea>
                     <p class="field-help">{m.text_relay_servers_hint()}</p>
                     <div class="mt-6 w-full">
-                      <label class="field-label" for="grid-last-name">{m.field_seed()}</label>
+                      <label class="field-label" for="rng-seed-input">{m.field_seed()}</label>
                       <input
                         class="field"
-                        id="grid-last-name"
+                        id="rng-seed-input"
                         type="number"
                         inputmode="numeric"
                         bind:value={rngSeedInput}
@@ -704,10 +709,15 @@
                 {/if}
               </div>
             </div>
-            <!-- <div class="checkbox-field mb-4 flex w-full items-center gap-2 px-3">
+            <div class="checkbox-field mb-4 flex w-full items-center gap-2 px-3">
               <label class="field-label mb-0!" for="tutorial-mode">Tutorial Mode</label>
-              <input id="tutorial-mode" type="checkbox" bind:checked={isTutorialMode} />
-            </div> -->
+              <input
+                id="tutorial-mode"
+                type="checkbox"
+                bind:checked={isTutorialMode}
+                disabled={sizePreset === "custom"}
+              />
+            </div>
           </div>
           <div class="flex flex-wrap justify-center gap-2">
             <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
@@ -731,12 +741,12 @@
               <input class="field" id="join-player-name" type="text" bind:value={playerNameInput} />
             </div>
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label class="field-label" for="grid-first-name"
+              <label class="field-label" for="ticket-input"
                 >{m.field_ticket_or_invitation_url()}</label
               >
               <input
                 class="field"
-                id="grid-first-name"
+                id="ticket-input"
                 type="text"
                 bind:value={ticketInput}
                 oninput={() => (joinError = undefined)}
