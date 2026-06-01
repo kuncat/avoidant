@@ -101,7 +101,7 @@
   let connectedPeerCount = $derived(
     ($networkSnapshot?.peers ?? []).filter((peer) => peer.isConnected).length,
   );
-  let cameraZoom = $state(7);
+  let cameraFov = $state(50);
 
   function toggleScoreBreakdown() {
     isScoreBreakdownPinned = !isScoreBreakdownPinned;
@@ -114,7 +114,7 @@
     }
   }
 
-  function calculateCoverZoom(
+  function calculateCoverFov(
     viewportWidth: number,
     viewportHeight: number,
     elevationMin: number,
@@ -164,17 +164,23 @@
     const projectedWidth = Math.max(1e-6, maxRight - minRight);
     const projectedHeight = Math.max(1e-6, maxUp - minUp);
 
-    // Threlte's orthographic frustum maps roughly 1 world unit to 1 pixel at zoom=1, so a cover fit is viewport-size divided by projected world size.
-    return Math.max(viewportWidth / projectedWidth, viewportHeight / projectedHeight) * 1.01;
+    const aspect = Math.max(1e-6, viewportWidth / viewportHeight);
+
+    // For perspective cover framing, choose the smaller of width/height fitting FOVs so the map fills the viewport similarly to the previous orthographic cover zoom.
+    const verticalFovForHeight = 2 * Math.atan(projectedHeight / (2 * CAMERA_ORBIT_RADIUS));
+    const verticalFovForWidth = 2 * Math.atan(projectedWidth / (2 * CAMERA_ORBIT_RADIUS * aspect));
+    const coverFovRadians = Math.min(verticalFovForHeight, verticalFovForWidth) * 0.99;
+    const coverFovDegrees = (coverFovRadians * 180) / Math.PI;
+    return Math.min(120, Math.max(10, coverFovDegrees));
   }
 
-  function setInitialCameraZoom() {
+  function setInitialCameraFov() {
     if (typeof window !== "undefined") {
       const viewportWidth = Math.max(1, window.innerWidth);
       const viewportHeight = Math.max(1, window.innerHeight);
       const elevationMin = gameState?.elevationMin ?? 0;
       const elevationMax = gameState?.elevationMax ?? 0;
-      cameraZoom = calculateCoverZoom(viewportWidth, viewportHeight, elevationMin, elevationMax);
+      cameraFov = calculateCoverFov(viewportWidth, viewportHeight, elevationMin, elevationMax);
     }
   }
 
@@ -214,7 +220,7 @@
 
   $effect(() => {
     if (!gameState) return;
-    setInitialCameraZoom();
+    setInitialCameraFov();
   });
 
   $effect(() => {
@@ -802,9 +808,9 @@
 {#if gameState}
   <div id="game-canvas-container" style="height: 100vh; width: 100%;">
     <Canvas colorSpace="srgb-linear">
-      <T.OrthographicCamera
+      <T.PerspectiveCamera
         makeDefault
-        zoom={cameraZoom}
+        fov={cameraFov}
         near={0.1}
         far={1000}
         position={cameraPosition}
