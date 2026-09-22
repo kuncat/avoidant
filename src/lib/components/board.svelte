@@ -1,7 +1,7 @@
 <script module lang="ts">
   import _vertexShader from "./vertex.glsl?raw";
   import _fragmentShader from "./fragment.glsl?raw";
-  import { MAP_AREA, PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
+  import { PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
   import openSans from "$lib/assets/OpenSans-VariableFont_wdth,wght.ttf?url";
   import { getLocale } from "$lib/paraglide/runtime";
 
@@ -45,6 +45,7 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
+  import { TerrainDepthSort } from "./terrain-depth-sort";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { Pulse } from "$lib/wasm/avoidant_wasm";
   import type { GameState } from "$lib/wasm/avoidant_wasm";
@@ -56,6 +57,7 @@
     DataTexture,
     DoubleSide,
     Mesh,
+    Matrix4,
     NearestFilter,
     RGBAFormat,
     ShaderMaterial,
@@ -69,7 +71,12 @@
 
   interface Props {
     gameState: GameState;
-    terrain?: { positions: number[]; normals: number[]; cellIndices: number[] } | undefined;
+    terrain?:
+      | { positions: number[]; normals: number[]; cellIndices: number[]; heights: number[] }
+      | undefined;
+    flat?: boolean;
+    surfaceArea?: number;
+    boundsRadius?: number;
     interactive?: boolean;
     highlightedCellIndex?: number | undefined;
     onCellClicked?: (cellIndex: number) => void;
@@ -78,6 +85,9 @@
   let {
     gameState = $bindable(),
     terrain = undefined,
+    flat = false,
+    surfaceArea = 0,
+    boundsRadius = 1,
     interactive = true,
     highlightedCellIndex = undefined,
     onCellClicked = undefined,
@@ -122,74 +132,169 @@
   /**
    * Build a merged triangle mesh for all cell interiors from a Rust-side subdivided terrain payload.
    *
-   * Each emitted vertex carries an `aCellIndex` attribute so the fragment shader can look up per-cell metadata in {@link CellMetaTexture}. The subdivision (and therefore the terrain detail) is decoupled from the Voronoi cell-corner density and is controlled by the `terrainSubdivisions` field on {@link GameOptions}.
+   * Each emitted vertex carries an `aCellIndex` attribute so the fragment shader can look up per-cell metadata in {@link CellMetaTexture}. It also carries `aCellNormal` (the cell's outward unit normal) so the vertex shader can displace falling void cells along the local outward direction — which is the face normal for polyhedra and the surface normal for spheroids — instead of along world Y.
    *
-   * When `shrinkFactor < 1`, every vertex's XZ position is contracted toward its cell's XZ centroid by that factor, producing gaps between adjacent cells. A second copy of the geometry rendered un-shrunken (with `shrinkFactor = 1`) underneath shows through those gaps as the "gap lines". Y values and normals are preserved as-is. At the 3-4% shrink range the slight inconsistency between a perimeter vertex's stored Y/normal and the true noise surface at its new XZ is invisible.
-   *
-   * @param payload - Pre-built positions (`[x, height, y]`-packed) and
-   *   per-vertex cell indices produced by the mapgen worker. `undefined`
-   *   yields an empty geometry, which is the expected state before mapgen
-   *   completes.
-   * @param insetDistance - World-space distance (XZ plane) to pull each vertex toward its cell centroid, producing a uniform-width gap along every cell boundary. `0` (default) leaves the mesh untouched. Per vertex the move is clamped to 80% of its centroid distance to avoid collapsing small cells.
-   * @returns A `BufferGeometry` with `position`, `aNormal`, and `aCellIndex` attributes.
+   * When `insetDistance > 0`, every vertex is pulled toward its cell's 3D centroid in the *tangent plane* perpendicular to the cell normal, producing uniform-width gaps between adjacent cells regardless of the cell's orientation on the surface. The component of the offset along the normal is left untouched so terrain elevation isn't squashed.
    */
   function buildTerrainLayer(
-    payload: { positions: number[]; normals: number[]; cellIndices: number[] } | undefined,
+    payload:
+      | { positions: number[]; normals: number[]; cellIndices: number[]; heights: number[] }
+      | undefined,
+    cellNormalsByIndex: Float32Array | undefined,
+    cellVertices: number[][][],
+    flat: boolean,
     insetDistance = 0,
   ): BufferGeometry {
     const geometry = new BufferGeometry();
     if (!payload || payload.positions.length === 0) {
       geometry.setAttribute("position", new BufferAttribute(new Float32Array(0), 3));
       geometry.setAttribute("aNormal", new BufferAttribute(new Float32Array(0), 3));
+      geometry.setAttribute("aCellNormal", new BufferAttribute(new Float32Array(0), 3));
       geometry.setAttribute("aCellIndex", new BufferAttribute(new Float32Array(0), 1));
+      geometry.setAttribute("aHeight", new BufferAttribute(new Float32Array(0), 1));
+      geometry.setAttribute("aEdgeDistance", new BufferAttribute(new Float32Array(0), 1));
       return geometry;
     }
 
     const positions = new Float32Array(payload.positions);
-    if (insetDistance > 0) {
-      const cellIndices = payload.cellIndices;
-      const vertexCount = cellIndices.length;
-      let maxCell = 0;
-      for (let i = 0; i < vertexCount; i++) {
-        if (cellIndices[i] > maxCell) maxCell = cellIndices[i];
+    const cellIndices = payload.cellIndices;
+    const vertexCount = cellIndices.length;
+
+    // Measure against the original cell perimeter, not the terrain triangle
+    // edges. Undo radial elevation before measuring so outlines follow hills
+    // without outlining the interior tessellation.
+    const edgeDistances = new Float32Array(vertexCount);
+    for (let i = 0; i < vertexCount; i++) {
+      const x = positions[i * 3];
+      const y = positions[i * 3 + 1];
+      const z = positions[i * 3 + 2];
+      const radius = Math.hypot(x, y, z);
+      const factor = radius > 0 ? 1 - payload.heights[i] / radius : 1;
+      const p = flat ? [x, y - payload.heights[i], z] : [x * factor, y * factor, z * factor];
+      const polygon = cellVertices[cellIndices[i]];
+      let nearest = Infinity;
+      for (let j = 0; j < polygon.length; j++) {
+        const a = polygon[j];
+        const b = polygon[(j + 1) % polygon.length];
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const dz = b[2] - a[2];
+        const lengthSquared = dx * dx + dy * dy + dz * dz;
+        const t =
+          lengthSquared > 0
+            ? Math.max(
+                0,
+                Math.min(
+                  1,
+                  ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy + (p[2] - a[2]) * dz) / lengthSquared,
+                ),
+              )
+            : 0;
+        nearest = Math.min(
+          nearest,
+          Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy, p[2] - a[2] - t * dz),
+        );
       }
-      const cellCount = maxCell + 1;
-      const sumX = new Float64Array(cellCount);
-      const sumZ = new Float64Array(cellCount);
-      const count = new Uint32Array(cellCount);
+      edgeDistances[i] = nearest;
+    }
+    geometry.setAttribute("aEdgeDistance", new BufferAttribute(edgeDistances, 1));
+
+    // Compute per-cell 3D centroid from terrain vertices (after de-displacement
+    // we'd be on the un-noised surface, but for inset purposes the displaced
+    // centroid works fine — the lateral move is tiny relative to elevation).
+    let maxCell = 0;
+    for (let i = 0; i < vertexCount; i++) {
+      if (cellIndices[i] > maxCell) maxCell = cellIndices[i];
+    }
+    const cellCount = maxCell + 1;
+    const sumX = new Float64Array(cellCount);
+    const sumY = new Float64Array(cellCount);
+    const sumZ = new Float64Array(cellCount);
+    const count = new Uint32Array(cellCount);
+    for (let i = 0; i < vertexCount; i++) {
+      const c = cellIndices[i];
+      sumX[c] += positions[i * 3 + 0];
+      sumY[c] += positions[i * 3 + 1];
+      sumZ[c] += positions[i * 3 + 2];
+      count[c]++;
+    }
+    const cx = new Float32Array(cellCount);
+    const cy = new Float32Array(cellCount);
+    const cz = new Float32Array(cellCount);
+    for (let c = 0; c < cellCount; c++) {
+      if (count[c] > 0) {
+        cx[c] = sumX[c] / count[c];
+        cy[c] = sumY[c] / count[c];
+        cz[c] = sumZ[c] / count[c];
+      }
+    }
+
+    // Per-vertex cell normal lookup.
+    const cellNormalAttr = new Float32Array(vertexCount * 3);
+    if (cellNormalsByIndex && cellNormalsByIndex.length >= cellCount * 3) {
       for (let i = 0; i < vertexCount; i++) {
         const c = cellIndices[i];
-        sumX[c] += positions[i * 3 + 0];
-        sumZ[c] += positions[i * 3 + 2];
-        count[c]++;
+        cellNormalAttr[i * 3 + 0] = cellNormalsByIndex[c * 3 + 0];
+        cellNormalAttr[i * 3 + 1] = cellNormalsByIndex[c * 3 + 1];
+        cellNormalAttr[i * 3 + 2] = cellNormalsByIndex[c * 3 + 2];
       }
-      const cx = new Float32Array(cellCount);
-      const cz = new Float32Array(cellCount);
+    } else {
+      // Fallback: derive cell normals from the average of per-vertex normals.
+      const nSum = new Float32Array(cellCount * 3);
+      for (let i = 0; i < vertexCount; i++) {
+        const c = cellIndices[i];
+        nSum[c * 3 + 0] += payload.normals[i * 3 + 0];
+        nSum[c * 3 + 1] += payload.normals[i * 3 + 1];
+        nSum[c * 3 + 2] += payload.normals[i * 3 + 2];
+      }
       for (let c = 0; c < cellCount; c++) {
-        if (count[c] > 0) {
-          cx[c] = sumX[c] / count[c];
-          cz[c] = sumZ[c] / count[c];
-        }
+        const nx = nSum[c * 3 + 0];
+        const ny = nSum[c * 3 + 1];
+        const nz = nSum[c * 3 + 2];
+        const len = Math.hypot(nx, ny, nz) || 1;
+        nSum[c * 3 + 0] = nx / len;
+        nSum[c * 3 + 1] = ny / len;
+        nSum[c * 3 + 2] = nz / len;
       }
+      for (let i = 0; i < vertexCount; i++) {
+        const c = cellIndices[i];
+        cellNormalAttr[i * 3 + 0] = nSum[c * 3 + 0];
+        cellNormalAttr[i * 3 + 1] = nSum[c * 3 + 1];
+        cellNormalAttr[i * 3 + 2] = nSum[c * 3 + 2];
+      }
+    }
+
+    if (insetDistance > 0) {
       for (let i = 0; i < vertexCount; i++) {
         const c = cellIndices[i];
         const dx = positions[i * 3 + 0] - cx[c];
+        const dy = positions[i * 3 + 1] - cy[c];
         const dz = positions[i * 3 + 2] - cz[c];
-        const d = Math.hypot(dx, dz);
-        if (d < 1e-6) continue;
-        const move = Math.min(insetDistance, d);
-        const k = move / d;
-        positions[i * 3 + 0] -= dx * k;
-        positions[i * 3 + 2] -= dz * k;
+        const nx = cellNormalAttr[i * 3 + 0];
+        const ny = cellNormalAttr[i * 3 + 1];
+        const nz = cellNormalAttr[i * 3 + 2];
+        const along = dx * nx + dy * ny + dz * nz;
+        const tx = dx - along * nx;
+        const ty = dy - along * ny;
+        const tz = dz - along * nz;
+        const tlen = Math.hypot(tx, ty, tz);
+        if (tlen < 1e-6) continue;
+        const move = Math.min(insetDistance, tlen);
+        const k = move / tlen;
+        positions[i * 3 + 0] -= tx * k;
+        positions[i * 3 + 1] -= ty * k;
+        positions[i * 3 + 2] -= tz * k;
       }
     }
 
     geometry.setAttribute("position", new BufferAttribute(positions, 3));
     geometry.setAttribute("aNormal", new BufferAttribute(new Float32Array(payload.normals), 3));
+    geometry.setAttribute("aCellNormal", new BufferAttribute(cellNormalAttr, 3));
     geometry.setAttribute(
       "aCellIndex",
       new BufferAttribute(new Float32Array(payload.cellIndices), 1),
     );
+    geometry.setAttribute("aHeight", new BufferAttribute(new Float32Array(payload.heights), 1));
     return geometry;
   }
 
@@ -205,6 +310,11 @@
     private readonly data: Uint8Array;
     /** Number of texels/cells. */
     readonly width: number;
+    revision = 0;
+
+    fallProgress(cellIndex: number): number {
+      return this.data[cellIndex * 4 + CellMetaChannel.FallProgress] / 255;
+    }
 
     /**
      * Allocate a cell metadata texture.
@@ -257,6 +367,7 @@
 
     /** Mark the texture dirty so Three.js re-uploads it on the next frame. */
     flush(): void {
+      this.revision++;
       this.texture.needsUpdate = true;
     }
 
@@ -266,10 +377,30 @@
     }
   }
 
-  // Each cell's vertices are pulled toward its XZ centroid by a constant distance (`CELL_GAP_HALF_WIDTH`). The total visible gap width is ~2× this value.
+  // Each cell's vertices are pulled toward its 3D centroid (in the cell's tangent plane) by a constant distance (`CELL_GAP_HALF_WIDTH`). The total visible gap width is ~2× this value.
   const CELL_GAP_HALF_WIDTH = 0.08;
-  const cellRadius = $derived(Math.sqrt(MAP_AREA / (Math.PI * Math.max(1, $cells.length))));
-  const terrainGeometry = $derived(buildTerrainLayer(terrain, CELL_GAP_HALF_WIDTH));
+  const cellRadius = $derived(
+    Math.sqrt(Math.max(0, surfaceArea) / (Math.PI * Math.max(1, $cells.length))),
+  );
+  const cellNormalsByIndex = $derived.by(() => {
+    const arr = new Float32Array($cells.length * 3);
+    for (let i = 0; i < $cells.length; i++) {
+      const n = $cells[i].normal;
+      arr[i * 3 + 0] = n[0];
+      arr[i * 3 + 1] = n[1];
+      arr[i * 3 + 2] = n[2];
+    }
+    return arr;
+  });
+  const terrainGeometry = $derived(
+    buildTerrainLayer(
+      terrain,
+      cellNormalsByIndex,
+      $cells.map((cell) => cell.vertices),
+      flat,
+      CELL_GAP_HALF_WIDTH,
+    ),
+  );
   const cellMeta = $derived(new CellMetaTexture($cells.length));
 
   let fallStart = new SvelteMap<number, number>();
@@ -297,14 +428,15 @@
       fragmentShader,
       side: DoubleSide,
       transparent: true,
+      depthWrite: false,
+      // Triangle sorting handles both sides together, including concave hills.
+      forceSinglePass: true,
       uniforms: {
+        uTransparentPass: { value: true },
         elevationMin: { value: gameState.elevationMin },
         elevationMax: { value: gameState.elevationMax },
         uCellMeta: { value: cellMeta.texture },
         uCellMetaSize: { value: cellMeta.width },
-        uLightDir: { value: new Vector3(0.45, 1.0, 0.3).normalize() },
-        uAmbient: { value: 0.55 },
-        uDiffuse: { value: 0.75 },
         pulseCount: { value: 0 },
         pulseTimers: { value: new Array(MAX_PULSES).fill(0) },
         pulsePositions: {
@@ -327,39 +459,58 @@
     };
   });
 
-  let terrainMesh = $derived(new Mesh(terrainGeometry, terrainMaterial));
+  // Opaque revealed cells populate depth first. The transparent pass blends
+  // unexplored/falling cells against that depth without blocking later layers.
+  const opaqueMaterial = $derived(
+    new ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      side: DoubleSide,
+      transparent: false,
+      depthWrite: true,
+      uniforms: { ...terrainMaterial.uniforms, uTransparentPass: { value: false } },
+    }),
+  );
+  $effect(() => {
+    const material = opaqueMaterial;
+    return () => material.dispose();
+  });
+  const opaqueMesh = $derived(new Mesh(terrainGeometry, opaqueMaterial));
+  let terrainMesh = $derived.by(() => {
+    const mesh = new Mesh(terrainGeometry, terrainMaterial);
+    const sorter = new TerrainDepthSort(terrainGeometry);
+    const meta = cellMeta;
+    const view = new Matrix4();
+    mesh.onBeforeRender = (_renderer, _scene, camera) => {
+      view.multiplyMatrices(camera.matrixWorldInverse, mesh.matrixWorld);
+      sorter.update(view, meta.revision, (cell) => meta.fallProgress(cell) * VOID_FALL_DISTANCE);
+    };
+    return mesh;
+  });
 
-  const LABEL_LIFT_FACTOR = 0.075;
+  const LABEL_LIFT_FACTOR = 0.4;
+  /// Maximum per-vertex elevation displacement (raw scalar from the noise field) seen inside each cell, used to lift labels above the noisiest part of the terrain.
   const terrainCellMaxHeights = $derived.by(() => {
-    const result: number[] = new Array($cells.length).fill(-Infinity);
+    const result: number[] = new Array($cells.length).fill(0);
     if (!terrain) return result;
-    const positions = terrain.positions;
+    const heights = terrain.heights;
     const cellIndices = terrain.cellIndices;
     for (let i = 0; i < cellIndices.length; i++) {
       const ci = cellIndices[i];
-      const h = positions[i * 3 + 1];
+      const h = heights[i];
       if (h > result[ci]) result[ci] = h;
     }
     return result;
   });
   const cellLabelAnchors = $derived(
     $cells.map((cell, idx) => {
-      const vs = cell.vertices;
-      if (vs.length === 0) return { x: 0, y: 0, z: 0 };
-      let sx = 0;
-      let sz = 0;
-      let maxH = -Infinity;
-      for (const [vx, vy, vh] of vs) {
-        sx += vx;
-        sz += vy;
-        if (vh > maxH) maxH = vh;
-      }
-      const terrainMax = terrainCellMaxHeights[idx];
-      if (terrainMax !== undefined && terrainMax > maxH) maxH = terrainMax;
+      const [cxv, cyv, czv] = cell.centroid;
+      const [nx, ny, nz] = cell.normal;
+      const lift = (terrainCellMaxHeights[idx] ?? 0) + cellRadius * LABEL_LIFT_FACTOR;
       return {
-        x: sx / vs.length,
-        y: maxH + cellRadius * LABEL_LIFT_FACTOR,
-        z: sz / vs.length,
+        x: cxv + nx * lift,
+        y: cyv + ny * lift,
+        z: czv + nz * lift,
       };
     }),
   );
@@ -442,6 +593,7 @@
   }
 </script>
 
+<T is={opaqueMesh} />
 <T is={terrainMesh} onclick={handleTerrainClick} />
 
 {#each $cellMetadata as entry, i (i)}

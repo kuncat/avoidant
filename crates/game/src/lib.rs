@@ -20,6 +20,7 @@ use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 mod net;
 use net::NetworkNode;
+pub use mapgen::MapShape;
 pub use score::ScoreState;
 pub use ui_state::UiState;
 
@@ -35,8 +36,19 @@ import type { Readable } from "svelte/store";
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct MapCell {
+    /// True 3D world-space polygon vertices on (or just above) the map
+    /// surface, CCW around `normal`.
     vertices: Vec<[f64; 3]>,
+    /// Global indices of adjacent cells, including cross-face neighbors that
+    /// share an actual boundary edge on the surface.
     neighbors: Vec<u32>,
+    /// 3D centroid of the cell on the surface (used for label anchoring, fan
+    /// triangulation apex, and pulse origins).
+    centroid: [f64; 3],
+    /// Outward unit normal at the cell's centroid. For polyhedra this is the
+    /// face normal; for the spheroid it's the surface normal at the centroid.
+    /// Used by the renderer to displace falling void cells outward.
+    normal: [f64; 3],
 }
 
 #[derive(Serialize, Deserialize, Tsify)]
@@ -97,17 +109,16 @@ pub struct GameOptions {
     /** Iroh relay server URLs to use for peer discovery and transport. */
     relay_urls: Option<Vec<String>>,
     #[tsify(optional)]
-    max_samples: Option<f64>,
-    #[tsify(optional)]
-    slack: Option<f64>,
+    /** Map surface shape. Defaults to Icosahedron { radius: 50.0 }. */
+    shape: Option<MapShape>,
     #[tsify(optional)]
     /** 0.0 = smooth broad hills, 1.0 = tight spiky features. Default: 0.4 */
     spikiness: Option<f64>,
     #[tsify(optional)]
-    /** Minimum vertex height in world units. Default: -0.4 */
+    /** Minimum vertex elevation displacement in world units. Default: -0.4 */
     elevation_min: Option<f64>,
     #[tsify(optional)]
-    /** Maximum vertex height in world units. Default: 0.4 */
+    /** Maximum vertex elevation displacement in world units. Default: 0.4 */
     elevation_max: Option<f64>,
     #[tsify(optional)]
     /** Per-cell terrain mesh subdivision level. Each fan triangle inside a cell is split into `S²` sub-triangles, sampling noise at every sub-vertex. */
@@ -119,7 +130,7 @@ pub struct GameOptions {
 
 /// Flat per-vertex terrain mesh, decoupled from cell corners.
 ///
-/// `positions` is a `[x, y, z]`-packed `f32` array (length is a multiple of 9 (3 verts per triangle, 3 floats per vert). `normals` is `[nx, ny, nz]`) packed and parallel to `positions`; each vertex carries a smooth normal derived analytically from the noise field so the shader can per-pixel-interpolate it and avoid faceted flat shading. `cell_indices` carries the owning cell index for each emitted vertex (length = `positions.len() / 3`). Built once per map by [`crate::mapgen::generate_terrain_triangles`].
+/// `positions` is a `[x, y, z]`-packed `f32` array (length is a multiple of 9 (3 verts per triangle, 3 floats per vert). `normals` is `[nx, ny, nz]`) packed and parallel to `positions`; each vertex carries a smooth normal derived analytically from the noise field so the shader can per-pixel-interpolate it and avoid faceted flat shading. `cell_indices` carries the owning cell index for each emitted vertex (length = `positions.len() / 3`). `heights` is the scalar elevation displacement per vertex (the raw value sampled from the noise field along the cell's outward normal); the shader uses it for the elevation color ramp. Built once per map by [`crate::mapgen::generate_terrain_triangles`].
 #[derive(Default, Serialize, Deserialize, Tsify)]
 #[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
@@ -127,6 +138,7 @@ pub struct TerrainTriangles {
     pub positions: Vec<f32>,
     pub normals: Vec<f32>,
     pub cell_indices: Vec<u32>,
+    pub heights: Vec<f32>,
 }
 
 /// Voronoi cell polygons paired with the subdivided terrain triangle mesh.
@@ -136,6 +148,13 @@ pub struct TerrainTriangles {
 pub struct MapData {
     pub cells: Vec<MapCell>,
     pub terrain: TerrainTriangles,
+    /// Estimated surface area of the generated shape in world units²; used
+    /// by the renderer to size per-cell visuals (labels, gap insets) from
+    /// the per-cell average area.
+    pub surface_area: f64,
+    /// Maximum radial extent of the un-displaced shape from the origin, in
+    /// world units. Used for camera framing.
+    pub bounds_radius: f64,
 }
 
 #[derive(Clone)]
@@ -269,10 +288,17 @@ extern "C" {
 }
 
 impl MapCell {
-    pub(crate) fn new(vertices: Vec<[f64; 3]>, neighbors: Vec<u32>) -> MapCell {
+    pub(crate) fn new(
+        vertices: Vec<[f64; 3]>,
+        neighbors: Vec<u32>,
+        centroid: [f64; 3],
+        normal: [f64; 3],
+    ) -> MapCell {
         MapCell {
             vertices,
             neighbors,
+            centroid,
+            normal,
         }
     }
 
@@ -280,9 +306,10 @@ impl MapCell {
         &self.neighbors
     }
 
-    /// XZ horizontal positions of this cell's vertices in world space. Returns one `[x, z]` pair per vertex.
-    pub(crate) fn vertex_xz(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
-        self.vertices.iter().map(|v| (v[0], v[1]))
+    /// 3D world-space positions of this cell's vertices on the (displaced)
+    /// surface. Returns one `[x, y, z]` triple per vertex.
+    pub(crate) fn vertex_xyz(&self) -> impl Iterator<Item = [f64; 3]> + '_ {
+        self.vertices.iter().copied()
     }
 }
 

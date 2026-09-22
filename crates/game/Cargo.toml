@@ -17,6 +17,7 @@ default = ["console_error_panic_hook"]
 [dependencies]
 anyhow = "1.0.102"
 bluenoise = "0.2.2"
+chull = "0.2.4"
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for

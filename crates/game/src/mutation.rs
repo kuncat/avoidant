@@ -163,10 +163,11 @@ pub(crate) fn apply_mutation_with_effects(
                 Err(_) => continue,
             };
             let mut max_d2: f64 = 0.0;
-            for (vx, vz) in cell.vertex_xz() {
+            for [vx, vy, vz] in cell.vertex_xyz() {
                 let dx = vx - px;
+                let dy = vy - py;
                 let dz = vz - pz;
-                let d2 = dx * dx + dz * dz;
+                let d2 = dx * dx + dy * dy + dz * dz;
                 if d2 > max_d2 {
                     max_d2 = d2;
                 }
@@ -329,17 +330,34 @@ fn compute_reveal_set(
     let cells_array: &Array = &**cells_ref;
     let metadata_ref = cell_metadata.borrow();
     let metadata_array: &Array = &**metadata_ref;
-    let len = metadata_array.length() as usize;
+    reveal_set(
+        metadata_array.length() as usize,
+        seed,
+        |i| {
+            serde_wasm_bindgen::from_value(metadata_array.get(i as u32)).map_err(|err| {
+                JsValue::from_str(&format!("Failed to decode chord metadata: {err}"))
+            })
+        },
+        |i| {
+            let cell: MapCell = serde_wasm_bindgen::from_value(cells_array.get(i as u32))
+                .map_err(|err| JsValue::from_str(&format!("Failed to decode chord cell: {err}")))?;
+            Ok(cell.neighbors().to_vec())
+        },
+    )
+}
 
+fn reveal_set(
+    len: usize,
+    seed: usize,
+    mut metadata: impl FnMut(usize) -> Result<CellMetadataEntry, JsValue>,
+    mut neighbors: impl FnMut(usize) -> Result<Vec<u32>, JsValue>,
+) -> Result<Vec<usize>, JsValue> {
     if seed >= len {
         return Ok(Vec::new());
     }
 
-    let seed_entry: CellMetadataEntry =
-        serde_wasm_bindgen::from_value(metadata_array.get(seed as u32)).map_err(|err| {
-            JsValue::from_str(&format!("Failed to decode seed cell metadata: {err}"))
-        })?;
-    if seed_entry.is_explored {
+    let seed_entry = metadata(seed)?;
+    if seed_entry.is_explored || seed_entry.is_revealing {
         return Ok(Vec::new());
     }
 
@@ -350,9 +368,8 @@ fn compute_reveal_set(
     visited.insert(seed);
 
     while let Some(i) = queue.pop_front() {
-        let entry: CellMetadataEntry = serde_wasm_bindgen::from_value(metadata_array.get(i as u32))
-            .map_err(|err| JsValue::from_str(&format!("Failed to decode chord metadata: {err}")))?;
-        if entry.is_explored {
+        let entry = metadata(i)?;
+        if entry.is_explored || entry.is_revealing {
             continue;
         }
         order.push(i);
@@ -361,9 +378,7 @@ fn compute_reveal_set(
             continue;
         }
 
-        let cell: MapCell = serde_wasm_bindgen::from_value(cells_array.get(i as u32))
-            .map_err(|err| JsValue::from_str(&format!("Failed to decode chord cell: {err}")))?;
-        for &neighbor in cell.neighbors() {
+        for neighbor in neighbors(i)? {
             let n_idx = neighbor as usize;
             if n_idx >= len {
                 continue;
@@ -376,4 +391,51 @@ fn compute_reveal_set(
     }
 
     Ok(order)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reveals_cross_faces_and_stop_at_numbered_cells() {
+        let map =
+            crate::mapgen::generate_map(60, 42, &crate::MapShape::Cube { radius: 50.0 }).unwrap();
+        let run = |seed, void: Option<usize>, busy: bool| {
+            reveal_set(
+                map.cells.len(),
+                seed,
+                |i| {
+                    let count = map.cells[i]
+                        .neighbors()
+                        .iter()
+                        .filter(|&&n| Some(n as usize) == void)
+                        .count() as u8;
+                    let mut entry = CellMetadataEntry::new(false, Some(i) == void, count);
+                    entry.is_revealing = busy;
+                    Ok(entry)
+                },
+                |i| Ok(map.cells[i].neighbors().to_vec()),
+            )
+            .unwrap()
+        };
+        assert_eq!(run(0, None, false).len(), map.cells.len());
+        assert!(run(0, None, true).is_empty());
+        assert!(run(map.cells.len(), None, false).is_empty());
+        let mine = 0;
+        assert_eq!(run(mine, Some(mine), false), vec![mine]);
+        let number = map.cells[mine].neighbors()[0] as usize;
+        assert_eq!(run(number, Some(mine), false), vec![number]);
+        let blank = (0..map.cells.len())
+            .find(|&i| i != mine && !map.cells[i].neighbors().contains(&(mine as u32)))
+            .unwrap();
+        let revealed = run(blank, Some(mine), false);
+        assert!(!revealed.contains(&mine));
+        assert!(revealed.len() > 1);
+        assert!(
+            revealed
+                .iter()
+                .any(|&i| map.cells[i].normal != map.cells[blank].normal)
+        );
+    }
 }
