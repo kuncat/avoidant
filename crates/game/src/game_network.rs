@@ -51,6 +51,8 @@ impl GameState {
         mutation: Mutation,
         origin: MutationOrigin,
     ) -> Result<(), JsValue> {
+        let Mutation::ExploreCell { index, .. } = mutation;
+        self.initialize_voids(index)?;
         apply_mutation_with_effects(
             &self.cells,
             &self.cell_metadata,

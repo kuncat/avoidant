@@ -634,7 +634,8 @@
               class="btn btn-primary"
               type="button"
               onclick={generateInvite}
-              disabled={isGeneratingInvite}
+              disabled={isGeneratingInvite || ($score?.safeExplored ?? 0) === 0}
+              title={($score?.safeExplored ?? 0) === 0 ? m.text_invite_after_opening() : undefined}
             >
               {#if isGeneratingInvite}
                 <span class="spinner" aria-hidden="true"></span>

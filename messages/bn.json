@@ -106,5 +106,6 @@
   "cells_per_face": "{count} / পৃষ্ঠ",
   "faces_count": "{count}টি পৃষ্ঠ",
   "field_surface_detail": "বহুতলকের পৃষ্ঠ",
-  "text_density_summary": "{faces}টি পৃষ্ঠ · মোট {count}টি ঘর"
+  "text_density_summary": "{faces}টি পৃষ্ঠ · মোট {count}টি ঘর",
+  "text_invite_after_opening": "খেলোয়াড়দের আমন্ত্রণ জানানোর আগে একটি ঘর উন্মোচন করুন।"
 }

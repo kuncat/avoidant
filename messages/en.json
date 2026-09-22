@@ -115,5 +115,6 @@
   "cells_per_face": "{count} / face",
   "faces_count": "{count} faces",
   "field_surface_detail": "Polyhedron faces",
-  "text_density_summary": "{faces} faces · {count} cells total"
+  "text_density_summary": "{faces} faces · {count} cells total",
+  "text_invite_after_opening": "Explore a cell before inviting players."
 }

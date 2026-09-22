@@ -58,6 +58,7 @@ impl GameState {
             elevation_min,
             elevation_max,
             void_fraction,
+            first_safe_cell: std::cell::Cell::new(options.first_safe_cell),
             network_node: None,
             network_channel: None,
             network_listener_started: false,
@@ -174,8 +175,13 @@ impl GameState {
 
     fn apply_generated_cells(&mut self, cells: Vec<MapCell>) -> Result<JsValue, JsValue> {
         let cell_count = cells.len();
-        let void_mask = compute_void_mask(cell_count, self.rng_seed, self.void_fraction);
-        let void_total = void_mask.iter().filter(|v| **v).count();
+        let void_mask = self
+            .first_safe_cell
+            .get()
+            .map(|safe| compute_void_mask(cell_count, self.rng_seed, self.void_fraction, safe))
+            .unwrap_or_else(|| vec![false; cell_count]);
+        let void_total = ((cell_count as f64 * self.void_fraction).floor() as usize)
+            .min(cell_count.saturating_sub(1));
 
         let output_cells = Array::new();
         let output_metadata = Array::new();
@@ -240,6 +246,15 @@ impl GameState {
 
     #[wasm_bindgen(js_name = "invite")]
     pub async fn invite(&mut self, nickname: String) -> Result<String, JsValue> {
+        let safe = self
+            .first_safe_cell
+            .get()
+            .ok_or_else(|| JsValue::from_str("Explore a cell before inviting players"))?;
+        let mut options: GameOptions =
+            serde_wasm_bindgen::from_value(JSON::parse(&self.game_options_json)?)?;
+        options.first_safe_cell = Some(safe);
+        let invite_options: String =
+            JSON::stringify(&serde_wasm_bindgen::to_value(&options)?)?.into();
         if self.network_node.is_none() {
             let node = NetworkNode::spawn_with_relay_urls(self.relay_urls.clone())
                 .await
@@ -272,7 +287,7 @@ impl GameState {
         };
 
         channel
-            .ticket_with_game_options(ticket_opts, Some(self.game_options_json.clone()))
+            .ticket_with_game_options(ticket_opts, Some(invite_options))
             .map_err(Into::<JsValue>::into)
     }
 
@@ -313,8 +328,42 @@ impl GameState {
     }
 }
 
+impl GameState {
+    pub(crate) fn initialize_voids(&self, safe: usize) -> Result<(), JsValue> {
+        if self.first_safe_cell.get().is_some() {
+            return Ok(());
+        }
+        let cells: Vec<MapCell> = {
+            let store = self.cells.borrow();
+            let array: &Array = &**store;
+            serde_wasm_bindgen::from_value(array.clone().into())?
+        };
+        if safe >= cells.len() {
+            return Err(JsValue::from_str("Invalid exploration cell"));
+        }
+        let mask = compute_void_mask(cells.len(), self.rng_seed, self.void_fraction, safe);
+        let metadata = Array::new();
+        for (index, cell) in cells.iter().enumerate() {
+            let count = cell
+                .neighbors()
+                .iter()
+                .filter(|&&neighbor| mask.get(neighbor as usize).copied().unwrap_or(false))
+                .count()
+                .min(u8::MAX as usize) as u8;
+            metadata.push(&serde_wasm_bindgen::to_value(&CellMetadataEntry::new(
+                false,
+                mask[index],
+                if mask[index] { 0 } else { count },
+            ))?);
+        }
+        self.first_safe_cell.set(Some(safe));
+        self.cell_metadata.borrow_mut().set(metadata);
+        Ok(())
+    }
+}
+
 /// Deterministically choose which cell indices are void.
-fn compute_void_mask(cell_count: usize, rng_seed: u64, fraction: f64) -> Vec<bool> {
+fn compute_void_mask(cell_count: usize, rng_seed: u64, fraction: f64, safe: usize) -> Vec<bool> {
     let mut mask = vec![false; cell_count];
     if cell_count == 0 || fraction <= 0.0 {
         return mask;
@@ -326,7 +375,7 @@ fn compute_void_mask(cell_count: usize, rng_seed: u64, fraction: f64) -> Vec<boo
         return mask;
     }
 
-    let mut indices: Vec<usize> = (0..cell_count).collect();
+    let mut indices: Vec<usize> = (0..cell_count).filter(|&index| index != safe).collect();
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(rng_seed ^ 0xA110_CA7E_BEEF_5EEDu64);
     indices.shuffle(&mut rng);
 
@@ -334,4 +383,25 @@ fn compute_void_mask(cell_count: usize, rng_seed: u64, fraction: f64) -> Vec<boo
         mask[index] = true;
     }
     mask
+}
+
+#[cfg(test)]
+mod opening_tests {
+    use super::compute_void_mask;
+    #[test]
+    fn opening_is_safe_with_exact_void_count_and_repeatable_layout() {
+        for count in [1, 4, 80, 160, 320] {
+            for safe in 0..count {
+                for fraction in [0.0, 0.15625, 0.999, 1.0] {
+                    let mask = compute_void_mask(count, 42, fraction, safe);
+                    assert!(!mask[safe]);
+                    assert_eq!(
+                        mask.iter().filter(|&&v| v).count(),
+                        ((count as f64 * fraction).floor() as usize).min(count - 1)
+                    );
+                    assert_eq!(mask, compute_void_mask(count, 42, fraction, safe));
+                }
+            }
+        }
+    }
 }

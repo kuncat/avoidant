@@ -19,8 +19,8 @@ use svelte_store::Readable;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 mod net;
-use net::NetworkNode;
 pub use mapgen::MapShape;
+use net::NetworkNode;
 pub use score::ScoreState;
 pub use ui_state::UiState;
 
@@ -126,6 +126,9 @@ pub struct GameOptions {
     #[tsify(optional)]
     // Fraction of cells to mark as void in `[0.0, 1.0]`.
     void_fraction: Option<f64>,
+    #[tsify(optional)]
+    #[serde(default)]
+    first_safe_cell: Option<usize>,
 }
 
 /// Flat per-vertex terrain mesh, decoupled from cell corners.
@@ -267,6 +270,7 @@ pub struct GameState {
     elevation_min: f64,
     elevation_max: f64,
     void_fraction: f64,
+    first_safe_cell: std::cell::Cell<Option<usize>>,
 }
 
 #[wasm_bindgen]
