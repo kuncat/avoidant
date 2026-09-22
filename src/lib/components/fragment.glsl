@@ -1,9 +1,11 @@
 varying vec3 vWorldPosition;
-varying vec3 vNormal;
 varying float vHeight;
+varying float vEdgeDistance;
+varying float vRelief;
 varying float vCellIndex;
 varying float vFallProgress;
 
+uniform bool uTransparentPass;
 uniform float elevationMin;
 uniform float elevationMax;
 uniform sampler2D uCellMeta;
@@ -14,14 +16,11 @@ uniform vec3 pulsePositions[MAX_PULSES];
 uniform float pulseOriginCells[MAX_PULSES];
 uniform float pulseIsRemote[MAX_PULSES];
 uniform float pulseMaxRadii[MAX_PULSES];
-uniform vec3 uLightDir;
-uniform float uAmbient;
-uniform float uDiffuse;
 uniform float uHighlightedCell;
 uniform float uTime;
 
 float remapClamped(float value, float inMin, float inMax, float outMin, float outMax) {
-  float t = clamp((value - inMin) / (inMax - inMin), 0.0, 1.0);
+  float t = clamp((value - inMin) / max(inMax - inMin, 0.0001), 0.0, 1.0);
   return mix(outMin, outMax, t);
 }
 
@@ -33,6 +32,17 @@ void main() {
   float isRevealing = meta[CELL_META_REVEALING];
   // Once an explored void cell has fully fallen, drop every fragment.
   if (isVoid > 0.5 && isExplored > 0.5 && vFallProgress >= 0.999) discard;
+
+  // Unexplored cells retain slight transparency; revealed solid cells are opaque.
+  float alpha = isExplored > 0.5 ? 1.0 : 0.95;
+  // Fade alpha while an explored void cell is falling.
+  if (isVoid > 0.5 && isExplored > 0.5) {
+    alpha = clamp(1.0 - vFallProgress, 0.0, 1.0);
+  }
+
+  // Keep opaque depth separate from blended layers. The two passes must be
+  // mutually exclusive so no cell is drawn twice.
+  if (uTransparentPass ? alpha >= 1.0 : alpha < 1.0) discard;
 
   float elevation = remapClamped(vHeight, elevationMin, elevationMax, 0.0, 1.0);
 
@@ -48,7 +58,9 @@ void main() {
     float maxRadius = pulseMaxRadii[i];
     float ringRadius = pulseProgress * maxRadius;
     float ringWidth = 1.2;
-    float distToOrigin = distance(vWorldPosition.xz, pulsePositions[i].xz);
+    // Use full 3D distance — pulses radiate outward over the curved surface
+    // of the polyhedron/spheroid, not within an XZ plane.
+    float distToOrigin = distance(vWorldPosition, pulsePositions[i]);
     float ringDistance = abs(distToOrigin - ringRadius);
     float ring = (1.0 - smoothstep(ringWidth, ringWidth + 0.8, ringDistance)) * pulseActive;
     float pulseFade = 1.0 - pulseProgress;
@@ -69,19 +81,16 @@ void main() {
 
   vec3 unexploredLow = vec3(0.2588, 0.2588, 0.2784);
   vec3 unexploredHigh = vec3(0.4431, 0.451, 0.4706);
-  vec3 exploredLow = vec3(0.6588, 0.7098, 0.7922);
-  vec3 exploredHigh = vec3(0.6784, 0.7137, 0.7451);
+  vec3 exploredLow = vec3(0.43, 0.5, 0.59);
+  vec3 exploredHigh = vec3(0.75, 0.79, 0.84);
 
   vec3 lowColor = mix(unexploredLow, exploredLow, colorFactor);
   vec3 highColor = mix(unexploredHigh, exploredHigh, colorFactor);
   vec3 terrainColor = mix(lowColor, highColor, elevation);
 
-  // Smooth hillshading
-  vec3 shadingNormal = normalize(vNormal);
-  if (shadingNormal.y < 0.0) shadingNormal = -shadingNormal;
-  float ndotl = max(dot(shadingNormal, normalize(uLightDir)), 0.0);
-  float shade = clamp(uAmbient + uDiffuse * ndotl, 0.0, 1.5);
-  terrainColor *= shade;
+  // Uniform illumination keeps every face readable regardless of its
+  // orientation, with a subdued level that avoids near-white revealed cells.
+  terrainColor *= 0.9 * mix(0.82, 1.0, vRelief);
 
   vec3 localPulseTint = vec3(0.55, 0.95, 1.0);
   vec3 remotePulseTint = vec3(1.0, 0.42, 0.38);
@@ -97,11 +106,12 @@ void main() {
     finalColor = mix(finalColor, glowColor, 0.35 + 0.45 * glowPulse);
   }
 
-  float alpha = isExplored > 0.5 ? 1.0 : 0.25;
-  // Fade alpha while an explored void cell is falling.
-  if (isVoid > 0.5 && isExplored > 0.5) {
-    alpha = clamp(1.0 - vFallProgress, 0.0, 1.0);
-  }
+  // Draw an antialiased perimeter on the surface itself. A pixel-based
+  // minimum keeps borders visible when zooming out or viewing at an angle.
+  float edgePixel = max(fwidth(vEdgeDistance), 0.0001);
+  float borderWidth = max(0.04, 1.1 * edgePixel);
+  float border = 1.0 - smoothstep(borderWidth, borderWidth + edgePixel, vEdgeDistance);
+  finalColor = mix(finalColor, vec3(0.1, 0.13, 0.18), border * 0.9);
 
   gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), alpha);
 }

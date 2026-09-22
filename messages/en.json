@@ -26,14 +26,38 @@
   "error_join_ticket_invalid": "That invitation link or ticket is not valid.",
   "error_join_ticket_required": "Enter a ticket or invitation URL to join a game.",
   "field_invitation_url": "Invitation URL",
+  "field_map_shape": "Map Shape",
   "field_map_size": "Map Size",
   "field_player_name": "Player Name",
+  "field_radius": "Radius",
+  "field_radius_x": "Radius X",
+  "field_radius_y": "Radius Y",
+  "field_radius_z": "Radius Z",
   "field_relay_servers": "Iroh Relay Servers",
   "field_seed": "RNG Seed",
   "field_size": "Size",
+  "field_spikiness": "Spikiness",
+  "field_subdivisions": "Subdivisions",
   "field_ticket_or_invitation_url": "Ticket or Invitation URL",
   "field_tutorial_mode": "Tutorial Mode",
   "field_void_fraction": "Void Cell Fraction",
+  "shape_label": [
+    {
+      "declarations": ["input kind"],
+      "match": {
+        "kind=flat": "Flat",
+        "kind=tetrahedron": "Tetrahedron (4 faces)",
+        "kind=cube": "Cube (6 faces)",
+        "kind=octahedron": "Octahedron (8 faces)",
+        "kind=dodecahedron": "Dodecahedron (12 faces)",
+        "kind=icosahedron": "Icosahedron (20 faces)",
+        "kind=geodesicIcosphere": "Geodesic icosphere",
+        "kind=spheroid": "Spheroid",
+        "kind=*": "{kind}"
+      },
+      "selectors": ["kind"]
+    }
+  ],
   "label_advanced_settings": "Advanced Settings",
   "label_players": [
     {
@@ -86,5 +110,11 @@
   "tutorial_after_void": "That was a void! Voids are the cells you want to avoid and pressing each one ends your streak and deducts points. Click another cell to keep exploring.",
   "tutorial_awaiting_first_click": "The map is now interactive. Press any cell to reveal it and remember your goal is to avoid pressing \"void\" cells. Each safe cell with any void neighbors shows a number indicating how many of their neighbors are voids. As you explore the map, use that information to try to deduce which cells are safe and which are void. Good luck!",
   "tutorial_intro": "Welcome to Avoidant. Take a moment to get familiar with moving the camera around: on a touchscreen, one-finger dragging will pan the map, and two fingers will let you rotate and zoom. With a mouse, drag with the left mouse button to pan, drag with the right mouse button to rotate, and scroll to zoom. With a trackpad, holding shift while dragging lets you rotate. When you're comfortable with the controls, press Next to start exploring cells.",
-  "tutorial_won": "Congratulations, you found every non-void cell! Your efficiency was {percent}%. Efficiency compares your score to the maximum possible score on this map: 100% means you only ever clicked safe cells."
+  "tutorial_won": "Congratulations, you found every non-void cell! Your efficiency was {percent}%. Efficiency compares your score to the maximum possible score on this map: 100% means you only ever clicked safe cells.",
+  "field_cell_density": "Cells per face",
+  "cells_per_face": "{count} / face",
+  "faces_count": "{count} faces",
+  "field_surface_detail": "Polyhedron faces",
+  "text_density_summary": "{faces} faces · {count} cells total",
+  "text_invite_after_opening": "Explore a cell before inviting players."
 }

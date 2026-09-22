@@ -1,9 +1,6 @@
 //! Per-game scoring metrics.
 
-use std::{cell::RefCell, rc::Rc};
-
 use serde::{Deserialize, Serialize};
-use svelte_store::Readable;
 use tsify::Tsify;
 
 /// Base points awarded per safe (non-void) explore, before streak multiplier.
@@ -98,8 +95,9 @@ fn streak_multiplier(streak: u32) -> f64 {
 /// Apply the score change for a single newly explored cell.
 ///
 /// `is_void` reflects the cell's pre-explore void status. Callers MUST only invoke this once per cell-explore transition.
-pub(crate) fn update_on_explore(store: &Rc<RefCell<Readable<ScoreState>>>, is_void: bool) {
-    store.borrow_mut().set_with(|state| {
+impl ScoreState {
+    pub(crate) fn explore(&mut self, is_void: bool) {
+        let state = self;
         let was_completed = state.completed;
 
         if is_void {
@@ -124,5 +122,5 @@ pub(crate) fn update_on_explore(store: &Rc<RefCell<Readable<ScoreState>>>, is_vo
             state.score += COMPLETION_BONUS_FRACTION * SAFE_REWARD * f64::from(safe_total);
             state.recompute_derived();
         }
-    });
+    }
 }

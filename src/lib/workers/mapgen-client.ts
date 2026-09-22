@@ -34,6 +34,8 @@ function getWorker(): Worker {
       entry.resolve({
         cells: data.cells,
         terrain: data.terrain,
+        surfaceArea: data.surfaceArea,
+        boundsRadius: data.boundsRadius,
       });
     } else {
       entry.reject(new Error(data.message));

@@ -17,14 +17,38 @@
   "error_join_ticket_invalid": "এই আমন্ত্রণ লিঙ্ক বা টিকিটটি বৈধ নয়।",
   "error_join_ticket_required": "গেমে যোগ দিতে একটি টিকিট বা আমন্ত্রণ URL লিখুন।",
   "field_invitation_url": "আমন্ত্রণ URL",
+  "field_map_shape": "ম্যাপের আকৃতি",
   "field_map_size": "ম্যাপের আকার",
   "field_player_name": "খেলোয়াড়ের নাম",
+  "field_radius": "ব্যাসার্ধ",
+  "field_radius_x": "ব্যাসার্ধ X",
+  "field_radius_y": "ব্যাসার্ধ Y",
+  "field_radius_z": "ব্যাসার্ধ Z",
   "field_relay_servers": "Iroh রিলে সার্ভার",
   "field_seed": "RNG সিড",
   "field_size": "আকার",
+  "field_spikiness": "তীক্ষ্ণতা",
+  "field_subdivisions": "উপবিভাজন",
   "field_ticket_or_invitation_url": "টিকিট বা আমন্ত্রণ URL",
   "field_tutorial_mode": "তালিম মোড",
   "field_void_fraction": "শূন্য সেলের অনুপাত",
+  "shape_label": [
+    {
+      "declarations": ["input kind"],
+      "match": {
+        "kind=flat": "সমতল",
+        "kind=tetrahedron": "টেট্রাহেড্রন (৪ মুখ)",
+        "kind=cube": "ঘনক (৬ মুখ)",
+        "kind=octahedron": "অষ্টভুজ (৮ মুখ)",
+        "kind=dodecahedron": "দ্বাদশভুজ (১২ মুখ)",
+        "kind=icosahedron": "বিংশভুজ (২০ মুখ)",
+        "kind=geodesicIcosphere": "জিওডেসিক গোলক",
+        "kind=spheroid": "গোলকাকার",
+        "kind=*": "{kind}"
+      },
+      "selectors": ["kind"]
+    }
+  ],
   "label_advanced_settings": "উন্নত সেটিংস",
   "label_players": [
     {
@@ -77,5 +101,11 @@
   "tutorial_after_safe_guess": "বাহ, সেলটি নিরাপদ ছিল। আরেকটি সেল বেছে নিন।",
   "tutorial_after_void": "সেটি শূন্য ছিল! শূন্য সেলই আপনাকে এড়াতে হবে — প্রতিটি শূন্যে চাপ দিলে আপনার ধারা শেষ হয় এবং পয়েন্ট কাটা যায়। আরেকটি সেলে চাপ দিয়ে অনুসন্ধান চালিয়ে যান।",
   "tutorial_intro": "Avoidant-এ স্বাগতম। প্রথমে ক্যামেরা ঘোরানোর সাথে পরিচিত হয়ে নিন: টাচস্ক্রিনে এক আঙুল দিয়ে টেনে ম্যাপ সরানো যায়, আর দুই আঙুলে ঘোরানো ও জুম করা যায়। মাউসে বাম বোতাম টেনে ম্যাপ সরান, ডান বোতাম টেনে ঘোরান, এবং স্ক্রল করে জুম করুন। ট্র্যাকপ্যাডে Shift চেপে টানলে ঘোরানো যাবে। নিয়ন্ত্রণে সাবলীল হলে পরবর্তী চাপুন এবং সেল অনুসন্ধান শুরু করুন।",
-  "tutorial_won": "অভিনন্দন, আপনি প্রতিটি অ-শূন্য সেল খুঁজে বের করেছেন! আপনার দক্ষতা ছিল {percent}%। দক্ষতা আপনার স্কোরকে এই ম্যাপের সর্বোচ্চ সম্ভাব্য স্কোরের সাথে তুলনা করে: ১০০% মানে আপনি কেবলমাত্র নিরাপদ সেলেই চাপ দিয়েছেন।"
+  "tutorial_won": "অভিনন্দন, আপনি প্রতিটি অ-শূন্য সেল খুঁজে বের করেছেন! আপনার দক্ষতা ছিল {percent}%। দক্ষতা আপনার স্কোরকে এই ম্যাপের সর্বোচ্চ সম্ভাব্য স্কোরের সাথে তুলনা করে: ১০০% মানে আপনি কেবলমাত্র নিরাপদ সেলেই চাপ দিয়েছেন।",
+  "field_cell_density": "প্রতি পৃষ্ঠে ঘর",
+  "cells_per_face": "{count} / পৃষ্ঠ",
+  "faces_count": "{count}টি পৃষ্ঠ",
+  "field_surface_detail": "বহুতলকের পৃষ্ঠ",
+  "text_density_summary": "{faces}টি পৃষ্ঠ · মোট {count}টি ঘর",
+  "text_invite_after_opening": "খেলোয়াড়দের আমন্ত্রণ জানানোর আগে একটি ঘর উন্মোচন করুন।"
 }

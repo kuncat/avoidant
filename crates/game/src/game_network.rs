@@ -1,9 +1,9 @@
 use wasm_bindgen::JsValue;
-use wasm_bindgen_futures::spawn_local;
 
 use crate::GameState;
 use crate::listener;
-use crate::mutation::{Mutation, MutationOrigin, apply_mutation_with_effects};
+use crate::mutation::{Mutation, MutationOrigin};
+use crate::sync_bridge::SyncBridge;
 
 impl GameState {
     pub(crate) fn attach_network_listener(&mut self) {
@@ -11,14 +11,11 @@ impl GameState {
             return;
         }
 
+        let sync = self.sync_bridge();
         let Some(channel) = self.network_channel.as_mut() else {
             return;
         };
 
-        let cells = self.cells.clone();
-        let cell_metadata = self.cell_metadata.clone();
-        let score = self.score.clone();
-        let ui_state = self.ui_state.clone();
         let connected_endpoints = self.connected_endpoints.clone();
         let peer_presence = self.peer_presence.clone();
         let network_snapshot = self.network_snapshot.clone();
@@ -31,10 +28,7 @@ impl GameState {
 
         listener::spawn_network_listener(
             receiver,
-            cells,
-            cell_metadata,
-            score,
-            ui_state,
+            sync,
             connected_endpoints,
             peer_presence,
             network_snapshot,
@@ -51,36 +45,27 @@ impl GameState {
         mutation: Mutation,
         origin: MutationOrigin,
     ) -> Result<(), JsValue> {
-        apply_mutation_with_effects(
-            &self.cells,
-            &self.cell_metadata,
-            &self.score,
-            &self.ui_state,
-            mutation,
-            origin,
-        )?;
-
+        let Mutation::ExploreCell {
+            index,
+            pulse_position,
+        } = mutation;
+        self.initialize_voids(index)?;
+        self.sync_bridge().local(index, pulse_position)?;
         if matches!(origin, MutationOrigin::Local) {
             *self.last_outbound_mutation_ms.borrow_mut() = Some(js_sys::Date::now());
-            self.broadcast_state_mutation(mutation);
             self.sync_network_snapshot();
         }
-
         Ok(())
     }
 
-    fn broadcast_state_mutation(&self, mutation: Mutation) {
-        let Some(channel) = self.network_channel.as_ref() else {
-            return;
-        };
-
-        let sender = channel.sender();
-        let payload = mutation.encode();
-
-        spawn_local(async move {
-            if let Err(err) = sender.broadcast(payload).await {
-                tracing::warn!("failed to broadcast state mutation: {:?}", err);
-            }
-        });
+    pub(crate) fn sync_bridge(&self) -> SyncBridge {
+        SyncBridge {
+            session: self.session.clone(),
+            cells: self.cells.clone(),
+            metadata: self.cell_metadata.clone(),
+            score: self.score.clone(),
+            ui: self.ui_state.clone(),
+            sender: self.network_channel.as_ref().map(|c| c.sender()),
+        }
     }
 }

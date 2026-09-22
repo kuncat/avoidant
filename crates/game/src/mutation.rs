@@ -1,4 +1,5 @@
-use std::{cell::RefCell, collections::HashSet, collections::VecDeque, rc::Rc};
+use std::collections::{HashSet, VecDeque};
+use std::{cell::RefCell, rc::Rc};
 
 use js_sys::Array;
 use n0_future::time::Duration;
@@ -6,109 +7,17 @@ use svelte_store::Readable;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::score::{self, ScoreState};
 use crate::{
     CellMetadataEntry, MapCell, PULSE_MIN_DURATION_MS, PULSE_SWEEP_BAND, PULSE_SWEEP_VELOCITY,
     UiState,
 };
 
-const MUTATION_DELIMITER: char = '|';
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum MutationKind {
-    Cell = 0,
-}
-
-impl MutationKind {
-    fn to_wire(self) -> u8 {
-        self as u8
-    }
-
-    fn from_wire(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::Cell),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum CellMutationOp {
-    ExploreCell = 0,
-}
-
-impl CellMutationOp {
-    fn to_wire(self) -> u8 {
-        self as u8
-    }
-
-    fn from_wire(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::ExploreCell),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum Mutation {
     ExploreCell {
         index: usize,
         pulse_position: [f64; 3],
     },
-}
-
-impl Mutation {
-    pub(crate) fn encode(self) -> String {
-        match self {
-            Self::ExploreCell {
-                index,
-                pulse_position: [x, y, z],
-            } => format!(
-                "{}{}{}{}{}{}{}{}{}{}{}",
-                MutationKind::Cell.to_wire(),
-                MUTATION_DELIMITER,
-                CellMutationOp::ExploreCell.to_wire(),
-                MUTATION_DELIMITER,
-                index,
-                MUTATION_DELIMITER,
-                x,
-                MUTATION_DELIMITER,
-                y,
-                MUTATION_DELIMITER,
-                z
-            ),
-        }
-    }
-
-    pub(crate) fn decode(input: &str) -> Option<Self> {
-        let mut parts = input.split(MUTATION_DELIMITER);
-        let kind: u8 = parts.next()?.parse().ok()?;
-        let op: u8 = parts.next()?.parse().ok()?;
-
-        let mutation = match MutationKind::from_wire(kind)? {
-            MutationKind::Cell => match CellMutationOp::from_wire(op)? {
-                CellMutationOp::ExploreCell => {
-                    let index: usize = parts.next()?.parse().ok()?;
-                    let x: f64 = parts.next()?.parse().ok()?;
-                    let y: f64 = parts.next()?.parse().ok()?;
-                    let z: f64 = parts.next()?.parse().ok()?;
-                    Self::ExploreCell {
-                        index,
-                        pulse_position: [x, y, z],
-                    }
-                }
-            },
-        };
-
-        if parts.next().is_some() {
-            return None;
-        }
-
-        Some(mutation)
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -117,22 +26,17 @@ pub(crate) enum MutationOrigin {
     Peer,
 }
 
-/// Apply an inbound (local or peer) mutation.
+/// Animate cells already committed by the authoritative game state.
 ///
 /// The combined `is_explored` and `is_revealing` update prevents a one-frame race where the pulse is gone but `is_revealing` is still set.
-pub(crate) fn apply_mutation_with_effects(
+pub(crate) fn animate_reveal(
     cells: &Rc<RefCell<Readable<Array>>>,
     cell_metadata: &Rc<RefCell<Readable<Array>>>,
-    score_state: &Rc<RefCell<Readable<ScoreState>>>,
     ui_state: &UiState,
     mutation: Mutation,
     origin: MutationOrigin,
+    reveal_indices: Vec<usize>,
 ) -> Result<(), JsValue> {
-    let is_completed = score_state.borrow_mut().set_with(|state| state.completed);
-    if is_completed {
-        return Ok(());
-    }
-
     let is_remote = matches!(origin, MutationOrigin::Peer);
     let (seed_index, pulse_position) = match mutation {
         Mutation::ExploreCell {
@@ -142,7 +46,6 @@ pub(crate) fn apply_mutation_with_effects(
     };
     let [px, py, pz] = pulse_position;
 
-    let reveal_indices = compute_reveal_set(cells, cell_metadata, seed_index)?;
     if reveal_indices.is_empty() {
         return Ok(());
     }
@@ -163,10 +66,11 @@ pub(crate) fn apply_mutation_with_effects(
                 Err(_) => continue,
             };
             let mut max_d2: f64 = 0.0;
-            for (vx, vz) in cell.vertex_xz() {
+            for [vx, vy, vz] in cell.vertex_xyz() {
                 let dx = vx - px;
+                let dy = vy - py;
                 let dz = vz - pz;
-                let d2 = dx * dx + dz * dz;
+                let d2 = dx * dx + dy * dy + dz * dz;
                 if d2 > max_d2 {
                     max_d2 = d2;
                 }
@@ -231,7 +135,6 @@ pub(crate) fn apply_mutation_with_effects(
     )?;
 
     let cell_metadata = cell_metadata.clone();
-    let score_state = score_state.clone();
     let ui_state = ui_state.clone();
     spawn_local(async move {
         // Walk the schedule in time order, batching cells whose finish moments fall within the same ~16 ms frame slice into a single `finalize_reveal` call.
@@ -256,7 +159,7 @@ pub(crate) fn apply_mutation_with_effects(
             if wait_ms > 0 {
                 n0_future::time::sleep(Duration::from_millis(wait_ms as u64)).await;
             }
-            if let Err(err) = finalize_reveal(&cell_metadata, &score_state, &bucket) {
+            if let Err(err) = finalize_reveal(&cell_metadata, &bucket) {
                 tracing::warn!("failed to finalize chord reveal batch: {:?}", err);
             }
             prev_ms = bucket_deadline;
@@ -275,71 +178,37 @@ pub(crate) fn apply_mutation_with_effects(
     Ok(())
 }
 
-/// End-of-pulse cleanup: clear `is_revealing` for every chord cell, flip `is_explored` for any that weren't already explored, and score each newly-revealed cell.
+/// End-of-pulse cleanup changes presentation only, never gameplay or score.
 fn finalize_reveal(
     cell_metadata: &Rc<RefCell<Readable<Array>>>,
-    score_state: &Rc<RefCell<Readable<ScoreState>>>,
     reveal_indices: &[usize],
 ) -> Result<(), JsValue> {
-    let newly_explored: Vec<bool> =
-        cell_metadata
-            .borrow_mut()
-            .set_with(|metadata_array| -> Result<Vec<bool>, JsValue> {
-                let mut newly: Vec<bool> = Vec::new();
-                for &idx in reveal_indices {
-                    if idx >= metadata_array.length() as usize {
-                        continue;
-                    }
-                    let metadata_js = metadata_array.get(idx as u32);
-                    let mut entry: CellMetadataEntry = serde_wasm_bindgen::from_value(metadata_js)
-                        .map_err(|err| {
-                            JsValue::from_str(&format!(
-                                "Failed to decode cell metadata for finalize: {err}"
-                            ))
-                        })?;
-                    entry.set_revealing(false);
-                    if !entry.is_explored {
-                        entry.mark_explored();
-                        newly.push(entry.is_void);
-                    }
-                    let updated = serde_wasm_bindgen::to_value(&entry).map_err(|err| {
-                        JsValue::from_str(&format!(
-                            "Failed to encode cell metadata for finalize: {err}"
-                        ))
-                    })?;
-                    metadata_array.set(idx as u32, updated);
-                }
-                Ok(newly)
-            })?;
-
-    for is_void in newly_explored {
-        score::update_on_explore(score_state, is_void);
-    }
-
-    Ok(())
+    cell_metadata
+        .borrow_mut()
+        .set_with(|array| -> Result<(), JsValue> {
+            for &index in reveal_indices {
+                let mut cell: CellMetadataEntry =
+                    serde_wasm_bindgen::from_value(array.get(index as u32))?;
+                cell.is_revealing = false;
+                cell.is_explored = true;
+                array.set(index as u32, serde_wasm_bindgen::to_value(&cell)?);
+            }
+            Ok(())
+        })
 }
 
-/// Build the BFS closure of cells that the chord auto-reveal will flip, starting from `seed`.]
-fn compute_reveal_set(
-    cells: &Rc<RefCell<Readable<Array>>>,
-    cell_metadata: &Rc<RefCell<Readable<Array>>>,
+pub(crate) fn reveal_set(
+    len: usize,
     seed: usize,
+    mut metadata: impl FnMut(usize) -> Result<CellMetadataEntry, JsValue>,
+    mut neighbors: impl FnMut(usize) -> Result<Vec<u32>, JsValue>,
 ) -> Result<Vec<usize>, JsValue> {
-    let cells_ref = cells.borrow();
-    let cells_array: &Array = &**cells_ref;
-    let metadata_ref = cell_metadata.borrow();
-    let metadata_array: &Array = &**metadata_ref;
-    let len = metadata_array.length() as usize;
-
     if seed >= len {
         return Ok(Vec::new());
     }
 
-    let seed_entry: CellMetadataEntry =
-        serde_wasm_bindgen::from_value(metadata_array.get(seed as u32)).map_err(|err| {
-            JsValue::from_str(&format!("Failed to decode seed cell metadata: {err}"))
-        })?;
-    if seed_entry.is_explored {
+    let seed_entry = metadata(seed)?;
+    if seed_entry.is_explored || seed_entry.is_revealing {
         return Ok(Vec::new());
     }
 
@@ -350,9 +219,8 @@ fn compute_reveal_set(
     visited.insert(seed);
 
     while let Some(i) = queue.pop_front() {
-        let entry: CellMetadataEntry = serde_wasm_bindgen::from_value(metadata_array.get(i as u32))
-            .map_err(|err| JsValue::from_str(&format!("Failed to decode chord metadata: {err}")))?;
-        if entry.is_explored {
+        let entry = metadata(i)?;
+        if entry.is_explored || entry.is_revealing {
             continue;
         }
         order.push(i);
@@ -361,9 +229,7 @@ fn compute_reveal_set(
             continue;
         }
 
-        let cell: MapCell = serde_wasm_bindgen::from_value(cells_array.get(i as u32))
-            .map_err(|err| JsValue::from_str(&format!("Failed to decode chord cell: {err}")))?;
-        for &neighbor in cell.neighbors() {
+        for neighbor in neighbors(i)? {
             let n_idx = neighbor as usize;
             if n_idx >= len {
                 continue;
@@ -376,4 +242,51 @@ fn compute_reveal_set(
     }
 
     Ok(order)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reveals_cross_faces_and_stop_at_numbered_cells() {
+        let map =
+            crate::mapgen::generate_map(60, 42, &crate::MapShape::Cube { radius: 50.0 }).unwrap();
+        let run = |seed, void: Option<usize>, busy: bool| {
+            reveal_set(
+                map.cells.len(),
+                seed,
+                |i| {
+                    let count = map.cells[i]
+                        .neighbors()
+                        .iter()
+                        .filter(|&&n| Some(n as usize) == void)
+                        .count() as u8;
+                    let mut entry = CellMetadataEntry::new(false, Some(i) == void, count);
+                    entry.is_revealing = busy;
+                    Ok(entry)
+                },
+                |i| Ok(map.cells[i].neighbors().to_vec()),
+            )
+            .unwrap()
+        };
+        assert_eq!(run(0, None, false).len(), map.cells.len());
+        assert!(run(0, None, true).is_empty());
+        assert!(run(map.cells.len(), None, false).is_empty());
+        let mine = 0;
+        assert_eq!(run(mine, Some(mine), false), vec![mine]);
+        let number = map.cells[mine].neighbors()[0] as usize;
+        assert_eq!(run(number, Some(mine), false), vec![number]);
+        let blank = (0..map.cells.len())
+            .find(|&i| i != mine && !map.cells[i].neighbors().contains(&(mine as u32)))
+            .unwrap();
+        let revealed = run(blank, Some(mine), false);
+        assert!(!revealed.contains(&mine));
+        assert!(revealed.len() > 1);
+        assert!(
+            revealed
+                .iter()
+                .any(|&i| map.cells[i].normal != map.cells[blank].normal)
+        );
+    }
 }

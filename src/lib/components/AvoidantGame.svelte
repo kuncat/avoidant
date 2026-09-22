@@ -1,37 +1,46 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { devicePixelRatio } from "svelte/reactivity/window";
   import { slide } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";
-  import init, { GameState, type GameOptions, type MapData } from "$lib/wasm/avoidant_wasm";
+  import init, {
+    GameState,
+    type GameOptions,
+    type MapData,
+    type MapShape,
+  } from "$lib/wasm/avoidant_wasm";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
-  import { MOUSE, TOUCH } from "three";
+  import { MOUSE, TOUCH, WebGLRenderer } from "three";
   import Board from "$lib/components/board.svelte";
-  import { MAP_HEIGHT, MAP_WIDTH } from "$lib/generated/shared-constants";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, locales, setLocale } from "$lib/paraglide/runtime";
   import { generateMap } from "$lib/workers/mapgen-client";
   import { TutorialState } from "$lib/tutorial.svelte";
 
+  const SETTINGS_STORAGE_KEY = "avoidant:gameSettings:v1";
   const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
   const SIZE_PRESETS = { small: 80, medium: 160, large: 320 } as const;
-  const MAP_MIN_X = 0;
-  const MAP_MIN_Z = 0;
-  const MAP_MAX_X = MAP_MIN_X + MAP_WIDTH;
-  const MAP_MAX_Z = MAP_MIN_Z + MAP_HEIGHT;
-  const MAP_CENTER_X = MAP_MIN_X + MAP_WIDTH / 2;
-  const MAP_CENTER_Z = MAP_MIN_Z + MAP_HEIGHT / 2;
+
+  // Default mapshape parameters used when a preset is picked or no custom value has been entered yet.
+  const DEFAULT_RADIUS = 50;
+
+  type ShapeKind = MapShape["kind"];
+  const SHAPE_KINDS: ShapeKind[] = [
+    "flat",
+    "icosahedron",
+    "spheroid",
+    "geodesicIcosphere",
+    "tetrahedron",
+    "cube",
+    "octahedron",
+    "dodecahedron",
+  ];
 
   const CAMERA_AZIMUTH_RAD = Math.PI / 4;
   const CAMERA_ELEVATION_RAD = Math.atan(0.5);
-  const CAMERA_ORBIT_RADIUS = 240;
-
-  const horizontalDistance = Math.cos(CAMERA_ELEVATION_RAD) * CAMERA_ORBIT_RADIUS;
-  const cameraPosition: [number, number, number] = [
-    MAP_CENTER_X + horizontalDistance * Math.sin(CAMERA_AZIMUTH_RAD),
-    Math.sin(CAMERA_ELEVATION_RAD) * CAMERA_ORBIT_RADIUS,
-    MAP_CENTER_Z + horizontalDistance * Math.cos(CAMERA_AZIMUTH_RAD),
-  ];
+  /// Camera orbit distance, derived from the generated map's bounds radius so the camera frames any 3D shape consistently.
+  const CAMERA_ORBIT_MULTIPLIER = 2.5;
 
   type SizePreset = keyof typeof SIZE_PRESETS | "custom";
   type Locale = (typeof locales)[number];
@@ -68,14 +77,17 @@
   let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
   let terrain = $state<MapData["terrain"] | undefined>(undefined);
+  let surfaceArea = $state(0);
+  let isFlatMap = $state(false);
+  let boundsRadius = $state(DEFAULT_RADIUS);
   let numCellsInput = $state(SIZE_PRESETS.medium);
   let voidFractionInput = $state(0.15625);
+  let spikinessInput = $state(0.8);
   let rngSeedInput = $state(0);
-  let playerNameInput = $state(
-    typeof window !== "undefined"
-      ? (localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? m.default_player_name())
-      : m.default_player_name(),
-  );
+  // Shape selection state. The shape kind drives which numeric inputs are shown; each per-shape numeric value persists independently so switching back and forth doesn't reset the user's edits.
+  let shapeKindInput = $state<ShapeKind>("icosahedron");
+  let playerNameInput = $state<string>(m.default_player_name());
+  let settingsLoaded = $state(false);
   let isTutorialMode = $state(false);
   let tutorial = $state<TutorialState | undefined>(undefined);
   let exploredCellsSeen = new SvelteSet<number>();
@@ -84,7 +96,6 @@
   let sizePreset = $state<SizePreset>("medium");
   let isAdvancedSettingsOpen = $state(false);
   let relayServersInput = $state("");
-  let relayServersInitialized = false;
   let hasRelayServersConfigured = $derived(parseRelayServersInput(relayServersInput).length > 0);
   let ticketInput = $state("");
   let joinError: string | undefined = $state(undefined);
@@ -111,6 +122,63 @@
   );
   let cameraFov = $state(50);
 
+  let selectedCellCount = $derived(
+    sizePreset === "custom" ? numCellsInput : SIZE_PRESETS[sizePreset],
+  );
+
+  let shapeSubdivisionsInput = $derived(
+    Math.max(
+      0,
+      Math.min(2, Math.floor(Math.log(Math.max(1, selectedCellCount / 80)) / Math.log(4))),
+    ),
+  );
+
+  let faceCount = $derived(
+    {
+      tetrahedron: 4,
+      cube: 6,
+      octahedron: 8,
+      dodecahedron: 12,
+      icosahedron: 20,
+      geodesicIcosphere: 20 * 4 ** shapeSubdivisionsInput,
+      flat: 0,
+      spheroid: 0,
+    }[shapeKindInput],
+  );
+  let usesFaceDensity = $derived(faceCount > 0);
+
+  function resolveShape(): MapShape {
+    const radius = DEFAULT_RADIUS * Math.sqrt(selectedCellCount / SIZE_PRESETS.medium);
+    switch (shapeKindInput) {
+      case "spheroid":
+        return {
+          kind: "spheroid",
+          radiusX: radius * 1.2,
+          radiusY: radius * 0.8,
+          radiusZ: radius,
+        };
+      case "geodesicIcosphere":
+        return {
+          kind: "geodesicIcosphere",
+          radius,
+          subdivisions: shapeSubdivisionsInput,
+        };
+      default:
+        return { kind: shapeKindInput, radius };
+    }
+  }
+
+  let cameraOrbitRadius = $derived(Math.max(1, boundsRadius) * CAMERA_ORBIT_MULTIPLIER);
+  let cameraPosition = $derived<[number, number, number]>(
+    isFlatMap
+      ? [0, cameraOrbitRadius, 0.0001]
+      : [
+          Math.cos(CAMERA_ELEVATION_RAD) * Math.sin(CAMERA_AZIMUTH_RAD) * cameraOrbitRadius,
+          Math.sin(CAMERA_ELEVATION_RAD) * cameraOrbitRadius,
+          Math.cos(CAMERA_ELEVATION_RAD) * Math.cos(CAMERA_AZIMUTH_RAD) * cameraOrbitRadius,
+        ],
+  );
+
   function toggleScoreBreakdown() {
     isScoreBreakdownPinned = !isScoreBreakdownPinned;
   }
@@ -122,78 +190,70 @@
     }
   }
 
+  /**
+   * Pick a perspective FOV so the bounding sphere of the generated shape (including the maximum elevation displacement) fits the viewport on both axes, with a small margin so cells near the silhouette aren't clipped.
+   */
   function calculateCoverFov(
     viewportWidth: number,
     viewportHeight: number,
-    elevationMin: number,
-    elevationMax: number,
+    contentRadius: number,
+    cameraDistance: number,
   ): number {
-    const forwardX = -Math.cos(CAMERA_ELEVATION_RAD) * Math.sin(CAMERA_AZIMUTH_RAD);
-    const forwardY = -Math.sin(CAMERA_ELEVATION_RAD);
-    const forwardZ = -Math.cos(CAMERA_ELEVATION_RAD) * Math.cos(CAMERA_AZIMUTH_RAD);
-
-    const rightX = -forwardZ;
-    const rightZ = forwardX;
-    const rightLength = Math.hypot(rightX, rightZ);
-    const normalizedRightX = rightX / rightLength;
-    const normalizedRightZ = rightZ / rightLength;
-
-    const upX = normalizedRightZ * forwardY;
-    const upY = -(normalizedRightX * forwardZ - normalizedRightZ * forwardX);
-    const upZ = -normalizedRightX * forwardY;
-
-    const yMin = Math.min(elevationMin, elevationMax);
-    const yMax = Math.max(elevationMin, elevationMax);
-    const corners = [
-      [MAP_MIN_X, yMin, MAP_MIN_Z],
-      [MAP_MIN_X, yMin, MAP_MAX_Z],
-      [MAP_MAX_X, yMin, MAP_MIN_Z],
-      [MAP_MAX_X, yMin, MAP_MAX_Z],
-      [MAP_MIN_X, yMax, MAP_MIN_Z],
-      [MAP_MIN_X, yMax, MAP_MAX_Z],
-      [MAP_MAX_X, yMax, MAP_MIN_Z],
-      [MAP_MAX_X, yMax, MAP_MAX_Z],
-    ];
-
-    let minRight = Infinity;
-    let maxRight = -Infinity;
-    let minUp = Infinity;
-    let maxUp = -Infinity;
-
-    for (const [x, y, z] of corners) {
-      const projectedRight = x * normalizedRightX + z * normalizedRightZ;
-      const projectedUp = x * upX + y * upY + z * upZ;
-      minRight = Math.min(minRight, projectedRight);
-      maxRight = Math.max(maxRight, projectedRight);
-      minUp = Math.min(minUp, projectedUp);
-      maxUp = Math.max(maxUp, projectedUp);
-    }
-
-    const projectedWidth = Math.max(1e-6, maxRight - minRight);
-    const projectedHeight = Math.max(1e-6, maxUp - minUp);
-
     const aspect = Math.max(1e-6, viewportWidth / viewportHeight);
-
-    // For perspective cover framing, choose the smaller of width/height fitting FOVs so the map fills the viewport similarly to the previous orthographic cover zoom.
-    const verticalFovForHeight = 2 * Math.atan(projectedHeight / (2 * CAMERA_ORBIT_RADIUS));
-    const verticalFovForWidth = 2 * Math.atan(projectedWidth / (2 * CAMERA_ORBIT_RADIUS * aspect));
-    const coverFovRadians = Math.min(verticalFovForHeight, verticalFovForWidth) * 0.99;
+    // Vertical FOV that exactly fits the bounding sphere's diameter on screen.
+    const verticalFov = 2 * Math.atan(contentRadius / Math.max(1e-6, cameraDistance));
+    // Adjust for the viewport aspect ratio so the sphere fits horizontally too.
+    const verticalFovForWidth =
+      2 * Math.atan(contentRadius / (Math.max(1e-6, cameraDistance) * aspect));
+    const coverFovRadians = Math.max(verticalFov, verticalFovForWidth);
     const coverFovDegrees = (coverFovRadians * 180) / Math.PI;
-    return Math.min(120, Math.max(10, coverFovDegrees));
+    // Add 5% margin so silhouette cells aren't clipped at the viewport edges.
+    return Math.min(120, Math.max(10, coverFovDegrees * 1.05));
   }
 
   function setInitialCameraFov() {
     if (typeof window !== "undefined") {
       const viewportWidth = Math.max(1, window.innerWidth);
       const viewportHeight = Math.max(1, window.innerHeight);
-      const elevationMin = gameState?.elevationMin ?? 0;
-      const elevationMax = gameState?.elevationMax ?? 0;
-      cameraFov = calculateCoverFov(viewportWidth, viewportHeight, elevationMin, elevationMax);
+      const elevationMax = Math.abs(gameState?.elevationMax ?? 0);
+      const contentRadius = boundsRadius + elevationMax;
+      cameraFov = calculateCoverFov(
+        viewportWidth,
+        viewportHeight,
+        contentRadius,
+        cameraOrbitRadius,
+      );
     }
   }
 
   onMount(() => {
     rngSeedInput = Math.floor(Date.now() / 1000);
+    relayServersInput = normalizeRelayServerList(relayServers).join("\n");
+    try {
+      playerNameInput = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? playerNameInput;
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? "null");
+      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+        if (SHAPE_KINDS.includes(saved.shapeKind)) shapeKindInput = saved.shapeKind;
+        if (["small", "medium", "large", "custom"].includes(saved.sizePreset))
+          sizePreset = saved.sizePreset;
+        if (Number.isInteger(saved.numCells) && saved.numCells >= 32 && saved.numCells <= 5000)
+          numCellsInput = saved.numCells;
+        if (
+          typeof saved.voidFraction === "number" &&
+          saved.voidFraction >= 0 &&
+          saved.voidFraction <= 0.999
+        )
+          voidFractionInput = saved.voidFraction;
+        if (typeof saved.spikiness === "number" && saved.spikiness >= 0 && saved.spikiness <= 1)
+          spikinessInput = saved.spikiness;
+        if (Number.isSafeInteger(saved.rngSeed) && saved.rngSeed >= 0) rngSeedInput = saved.rngSeed;
+        if (typeof saved.relayServers === "string") relayServersInput = saved.relayServers;
+        if (typeof saved.tutorialMode === "boolean") isTutorialMode = saved.tutorialMode;
+      }
+    } catch {
+      // Storage may be unavailable or contain malformed data; keep usable defaults.
+    }
+    settingsLoaded = true;
 
     const initializeWasm = async () => {
       try {
@@ -218,15 +278,6 @@
   });
 
   $effect(() => {
-    if (relayServersInitialized) {
-      return;
-    }
-
-    relayServersInput = normalizeRelayServerList(relayServers).join("\n");
-    relayServersInitialized = true;
-  });
-
-  $effect(() => {
     if (!gameState) return;
     setInitialCameraFov();
   });
@@ -238,11 +289,22 @@
   });
 
   $effect(() => {
-    if (typeof window !== "undefined") {
+    if (settingsLoaded) {
+      const settings = {
+        shapeKind: shapeKindInput,
+        sizePreset,
+        numCells: numCellsInput,
+        voidFraction: voidFractionInput,
+        spikiness: spikinessInput,
+        rngSeed: rngSeedInput,
+        relayServers: relayServersInput,
+        tutorialMode: isTutorialMode,
+      };
       try {
         localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerNameInput);
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
       } catch (error) {
-        console.warn("Failed to persist player name", error);
+        console.warn("Failed to persist game settings", error);
       }
     }
   });
@@ -344,24 +406,25 @@
 
   async function startGame() {
     try {
-      const resolvedNumCells =
-        sizePreset === "custom" ? $state.snapshot(numCellsInput) : SIZE_PRESETS[sizePreset];
-      const voidFraction = sizePreset === "custom" ? $state.snapshot(voidFractionInput) : 0.15625;
       const relayUrls = parseRelayServersInput($state.snapshot(relayServersInput));
       const options: GameOptions = {
         elevationMax: 6.0,
         elevationMin: 0.0,
-        numCells: resolvedNumCells,
+        numCells: selectedCellCount,
         relayUrls: relayUrls.length > 0 ? relayUrls : undefined,
         rngSeed: $state.snapshot(rngSeedInput),
-        spikiness: 0.8,
-        voidFraction: voidFraction,
+        shape: resolveShape(),
+        spikiness: $state.snapshot(spikinessInput),
+        voidFraction: $state.snapshot(voidFractionInput),
       };
       status = m.status_generating_map();
+      isFlatMap = options.shape?.kind === "flat";
       gameState = new GameState(options);
       const generated = await generateMap(options);
       gameState.applyMapCells(generated.cells);
       terrain = generated.terrain;
+      surfaceArea = generated.surfaceArea;
+      boundsRadius = generated.boundsRadius;
       inviteTicket = "";
       exploredCellsSeen = new SvelteSet<number>();
       pendingTutorialClick = undefined;
@@ -421,8 +484,11 @@
         }
         throw new Error(m.error_join_connect_failed(), { cause: error });
       }
+      isFlatMap = options.shape?.kind === "flat";
       gameState = nextGameState;
       terrain = generated.terrain;
+      surfaceArea = generated.surfaceArea;
+      boundsRadius = generated.boundsRadius;
       inviteTicket = "";
       succeeded = true;
     } catch (error) {
@@ -454,7 +520,6 @@
     tutorial = undefined;
     exploredCellsSeen = new SvelteSet<number>();
     pendingTutorialClick = undefined;
-    rngSeedInput = Math.floor(Date.now() / 1000);
   }
 
   async function copyInviteTicket() {
@@ -589,12 +654,13 @@
           {/if}
         </div>
         <div class="flex gap-2">
-          {#if !isTutorialMode && hasRelayServersConfigured && ($score?.safeExplored ?? 0) + ($score?.voidExplored ?? 0) === 0}
+          {#if !isTutorialMode && hasRelayServersConfigured}
             <button
               class="btn btn-primary"
               type="button"
               onclick={generateInvite}
-              disabled={isGeneratingInvite}
+              disabled={isGeneratingInvite || ($score?.safeExplored ?? 0) === 0}
+              title={($score?.safeExplored ?? 0) === 0 ? m.text_invite_after_opening() : undefined}
             >
               {#if isGeneratingInvite}
                 <span class="spinner" aria-hidden="true"></span>
@@ -627,6 +693,14 @@
             <div class="mb-4 w-full px-3">
               <label class="field-label" for="player-name">{m.field_player_name()}</label>
               <input class="field" id="player-name" type="text" bind:value={playerNameInput} />
+            </div>
+            <div class="mb-4 w-full px-3">
+              <label class="field-label" for="shape-select">{m.field_map_shape()}</label>
+              <select id="shape-select" class="field" bind:value={shapeKindInput}>
+                {#each SHAPE_KINDS as kind (kind)}
+                  <option value={kind}>{m.shape_label({ kind })}</option>
+                {/each}
+              </select>
             </div>
             <div class="mb-4 w-full px-3">
               <span class="field-label">{m.field_map_size()}</span>
@@ -674,9 +748,7 @@
                     <span class="preset-label">{preset.label}</span>
                     <span class="preset-count">
                       {preset.value === "custom"
-                        ? sizePreset === "custom"
-                          ? m.cells_count({ count: numCellsInput })
-                          : ""
+                        ? ""
                         : m.cells_count({ count: SIZE_PRESETS[preset.value] })}
                     </span>
                   </button>
@@ -684,39 +756,26 @@
               </div>
             </div>
             {#if sizePreset === "custom"}
-              <div class="w-full px-3" transition:slide={{ duration: 180 }}>
-                <div class="-mx-3 flex flex-wrap">
-                  <div class="mb-6 w-full px-3 md:mb-0 md:w-1/2">
-                    <label class="field-label" for="size-input">{m.field_size()}</label>
-                    <input
-                      class="field"
-                      id="size-input"
-                      type="number"
-                      inputmode="numeric"
-                      bind:value={numCellsInput}
-                      min="32"
-                      max="5000"
-                      step="1"
-                    />
-                  </div>
-                  <div class="w-full px-3 md:w-1/2">
-                    <label class="field-label" for="void-fraction-input">
-                      {m.field_void_fraction()}
-                    </label>
-                    <input
-                      class="field"
-                      id="void-fraction-input"
-                      type="number"
-                      inputmode="numeric"
-                      bind:value={voidFractionInput}
-                      max="0.999"
-                      min="0"
-                      step="0.001"
-                    />
-                  </div>
-                </div>
+              <div class="mb-4 w-full px-3">
+                <label class="field-label" for="size-input">{m.field_size()}</label>
+
+                <input
+                  class="field"
+                  id="size-input"
+                  type="number"
+                  required
+                  min="32"
+                  max="5000"
+                  step="1"
+                  bind:value={numCellsInput}
+                />
               </div>
             {/if}
+            <p class="field-help mb-4 w-full px-3">
+              {usesFaceDensity
+                ? m.text_density_summary({ faces: faceCount, count: selectedCellCount })
+                : m.cells_count({ count: selectedCellCount })}
+            </p>
             <div class="mb-4 w-full px-3">
               <div class="advanced-settings" class:advanced-settings-open={isAdvancedSettingsOpen}>
                 <button
@@ -734,6 +793,30 @@
                     class="advanced-settings-content"
                     transition:slide={{ duration: 180 }}
                   >
+                    <label class="field-label" for="void-fraction-input"
+                      >{m.field_void_fraction()}</label
+                    >
+                    <input
+                      class="field mb-3"
+                      id="void-fraction-input"
+                      type="number"
+                      required
+                      min="0"
+                      max="0.999"
+                      step="0.00001"
+                      bind:value={voidFractionInput}
+                    />
+                    <label class="field-label" for="spikiness-input">{m.field_spikiness()}</label>
+                    <input
+                      class="field mb-3"
+                      id="spikiness-input"
+                      type="number"
+                      required
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      bind:value={spikinessInput}
+                    />
                     <label class="field-label" for="relay-servers"
                       ><a
                         href="https://docs.iroh.computer/deployment/dedicated-infrastructure"
@@ -887,7 +970,14 @@
 
 {#if gameState}
   <div id="game-canvas-container" style="height: 100vh; width: 100%;">
-    <Canvas colorSpace="srgb-linear">
+    <Canvas
+      colorSpace="srgb-linear"
+      renderMode="on-demand"
+      dpr={Math.min(devicePixelRatio.current ?? 1, 1.5)}
+      shadows={false}
+      createRenderer={(canvas) =>
+        new WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "default" })}
+    >
       <T.PerspectiveCamera
         makeDefault
         fov={cameraFov}
@@ -896,8 +986,10 @@
         position={cameraPosition}
       />
       <Board
+        flat={isFlatMap}
         bind:gameState
         {terrain}
+        {surfaceArea}
         interactive={tutorial?.isExplorationAllowed ?? true}
         highlightedCellIndex={tutorial?.highlightedCellIndex}
         onCellClicked={(cellIndex) => {
@@ -905,14 +997,11 @@
         }}
       />
       <OrbitControls
-        enableDamping
         enablePan={true}
         enableZoom={true}
         enableRotate={true}
-        minPolarAngle={0}
-        maxPolarAngle={Math.PI / 2}
         mouseButtons={{ LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }}
-        target={[MAP_CENTER_X, 0, MAP_CENTER_Z]}
+        target={[0, 0, 0]}
         touches={{ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE }}
       />
     </Canvas>

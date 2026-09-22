@@ -13,6 +13,8 @@ export interface ResultResponse {
   requestId: number;
   cells: MapData["cells"];
   terrain: MapData["terrain"];
+  surfaceArea: number;
+  boundsRadius: number;
 }
 
 export interface ErrorResponse {
@@ -49,12 +51,15 @@ ctx.addEventListener("message", (event: MessageEvent<GenerateMessage>) => {
         positions: data.terrain.positions,
         normals: data.terrain.normals,
         cellIndices: data.terrain.cellIndices,
+        heights: data.terrain.heights,
       };
       respond({
         type: "result",
         requestId: message.requestId,
         cells: data.cells,
         terrain,
+        surfaceArea: data.surfaceArea,
+        boundsRadius: data.boundsRadius,
       });
     } catch (error) {
       respond({
