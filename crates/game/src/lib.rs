@@ -4,6 +4,8 @@ mod listener;
 mod mapgen;
 mod mutation;
 mod score;
+mod sync;
+mod sync_bridge;
 mod ui_state;
 mod utils;
 
@@ -51,7 +53,7 @@ pub struct MapCell {
     normal: [f64; 3],
 }
 
-#[derive(Serialize, Deserialize, Tsify)]
+#[derive(Clone, Serialize, Deserialize, Tsify)]
 #[tsify(from_wasm_abi, into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct CellMetadataEntry {
@@ -129,6 +131,12 @@ pub struct GameOptions {
     #[tsify(optional)]
     #[serde(default)]
     first_safe_cell: Option<usize>,
+    #[tsify(optional)]
+    #[serde(default)]
+    authority: Option<String>,
+    #[tsify(optional)]
+    #[serde(default)]
+    sync_version: Option<u8>,
 }
 
 /// Flat per-vertex terrain mesh, decoupled from cell corners.
@@ -252,6 +260,7 @@ impl Pulse {
 
 #[wasm_bindgen]
 pub struct GameState {
+    session: Rc<RefCell<sync::Session>>,
     cells: Rc<RefCell<Readable<Array>>>,
     cell_metadata: Rc<RefCell<Readable<Array>>>,
     score: Rc<RefCell<Readable<ScoreState>>>,
@@ -327,10 +336,6 @@ impl CellMetadataEntry {
         }
     }
 
-    pub(crate) fn mark_explored(&mut self) {
-        self.is_explored = true;
-    }
-
     pub(crate) fn set_revealing(&mut self, value: bool) {
         self.is_revealing = value;
     }
@@ -364,5 +369,11 @@ impl NetworkSnapshot {
             last_outbound_mutation_ms: None,
             sampled_at_ms: js_sys::Date::now(),
         }
+    }
+}
+
+impl Drop for GameState {
+    fn drop(&mut self) {
+        self.session.borrow_mut().stopped = true;
     }
 }

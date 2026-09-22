@@ -5,15 +5,12 @@ use std::{
 };
 
 use futures_util::StreamExt;
-use js_sys::Array;
 use js_sys::Date;
 use serde::Deserialize;
 use svelte_store::Readable;
-use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::UiState;
-use crate::mutation::{Mutation, MutationOrigin, apply_mutation_with_effects};
+use crate::sync_bridge::SyncBridge;
 use crate::{NetworkPeerStatus, NetworkSnapshot, PeerPresenceEntry};
 
 #[derive(Debug, Deserialize)]
@@ -53,10 +50,7 @@ enum NetworkEvent {
 
 pub(crate) fn spawn_network_listener(
     receiver: wasm_streams::readable::sys::ReadableStream,
-    cells: Rc<RefCell<Readable<Array>>>,
-    cell_metadata: Rc<RefCell<Readable<Array>>>,
-    score: Rc<RefCell<Readable<crate::ScoreState>>>,
-    ui_state: UiState,
+    sync: SyncBridge,
     connected_endpoints: Rc<RefCell<BTreeSet<String>>>,
     peer_presence: Rc<RefCell<HashMap<String, PeerPresenceEntry>>>,
     network_snapshot: Rc<RefCell<Readable<NetworkSnapshot>>>,
@@ -67,7 +61,28 @@ pub(crate) fn spawn_network_listener(
 ) {
     spawn_local(async move {
         let mut stream = wasm_streams::ReadableStream::from_raw(receiver).into_stream();
-        while let Some(event_result) = stream.next().await {
+        sync.tick();
+        let mut next_sync_ms = Date::now() + 3000.0;
+        loop {
+            if sync.session.borrow().stopped {
+                break;
+            }
+            let event = stream.next();
+            if Date::now() >= next_sync_ms {
+                sync.tick();
+                next_sync_ms = Date::now() + 3000.0;
+            }
+            let timeout = n0_future::time::sleep(n0_future::time::Duration::from_millis(
+                (next_sync_ms - Date::now()).max(1.0) as u64,
+            ));
+            futures_util::pin_mut!(event, timeout);
+            let event_result = match futures_util::future::select(event, timeout).await {
+                futures_util::future::Either::Left((Some(event), _)) => event,
+                futures_util::future::Either::Left((None, _)) => break,
+                futures_util::future::Either::Right(_) => {
+                    continue;
+                }
+            };
             match event_result {
                 Ok(event) => {
                     let now_ms = Date::now();
@@ -85,6 +100,7 @@ pub(crate) fn spawn_network_listener(
 
                     match parsed_event {
                         NetworkEvent::Joined { neighbors } => {
+                            sync.tick();
                             let mut connected_endpoints_ref = connected_endpoints.borrow_mut();
                             connected_endpoints_ref.clear();
                             connected_endpoints_ref.extend(neighbors.iter().cloned());
@@ -94,6 +110,7 @@ pub(crate) fn spawn_network_listener(
                             }
                         }
                         NetworkEvent::NeighborUp { endpoint_id } => {
+                            sync.tick();
                             connected_endpoints.borrow_mut().insert(endpoint_id.clone());
                             upsert_peer_presence(&peer_presence, &endpoint_id, None, None);
                         }
@@ -139,14 +156,7 @@ pub(crate) fn spawn_network_listener(
                                 continue;
                             }
 
-                            if let Err(err) = apply_incoming_mutation(
-                                &cells,
-                                &cell_metadata,
-                                &score,
-                                &ui_state,
-                                MutationOrigin::Peer,
-                                &text,
-                            ) {
+                            if let Err(err) = sync.receive(&from, &text) {
                                 tracing::warn!(
                                     "failed to apply state mutation from peer: {:?}",
                                     err
@@ -156,6 +166,7 @@ pub(crate) fn spawn_network_listener(
                             }
                         }
                         NetworkEvent::Lagged => {
+                            sync.tick();
                             tracing::warn!(
                                 "network stream lagged; some events may have been dropped"
                             );
@@ -237,19 +248,4 @@ fn publish_network_snapshot(
         sampled_at_ms: Date::now(),
     };
     network_snapshot_store.borrow_mut().set(network_snapshot);
-}
-
-fn apply_incoming_mutation(
-    cells: &Rc<RefCell<Readable<Array>>>,
-    cell_metadata: &Rc<RefCell<Readable<Array>>>,
-    score: &Rc<RefCell<Readable<crate::ScoreState>>>,
-    ui_state: &UiState,
-    origin: MutationOrigin,
-    message_text: &str,
-) -> Result<(), JsValue> {
-    let Some(mutation) = Mutation::decode(message_text) else {
-        return Ok(());
-    };
-
-    apply_mutation_with_effects(cells, cell_metadata, score, ui_state, mutation, origin)
 }
