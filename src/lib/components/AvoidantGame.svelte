@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { devicePixelRatio } from "svelte/reactivity/window";
   import { slide } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";
   import init, {
@@ -10,13 +11,14 @@
   } from "$lib/wasm/avoidant_wasm";
   import { Canvas, T } from "@threlte/core";
   import { OrbitControls } from "@threlte/extras";
-  import { MOUSE, TOUCH } from "three";
+  import { MOUSE, TOUCH, WebGLRenderer } from "three";
   import Board from "$lib/components/board.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, locales, setLocale } from "$lib/paraglide/runtime";
   import { generateMap } from "$lib/workers/mapgen-client";
   import { TutorialState } from "$lib/tutorial.svelte";
 
+  const SETTINGS_STORAGE_KEY = "avoidant:gameSettings:v1";
   const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
   const SIZE_PRESETS = { small: 80, medium: 160, large: 320 } as const;
 
@@ -84,11 +86,8 @@
   let rngSeedInput = $state(0);
   // Shape selection state. The shape kind drives which numeric inputs are shown; each per-shape numeric value persists independently so switching back and forth doesn't reset the user's edits.
   let shapeKindInput = $state<ShapeKind>("icosahedron");
-  let playerNameInput = $state(
-    typeof window !== "undefined"
-      ? (localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? m.default_player_name())
-      : m.default_player_name(),
-  );
+  let playerNameInput = $state<string>(m.default_player_name());
+  let settingsLoaded = $state(false);
   let isTutorialMode = $state(false);
   let tutorial = $state<TutorialState | undefined>(undefined);
   let exploredCellsSeen = new SvelteSet<number>();
@@ -97,7 +96,6 @@
   let sizePreset = $state<SizePreset>("medium");
   let isAdvancedSettingsOpen = $state(false);
   let relayServersInput = $state("");
-  let relayServersInitialized = false;
   let hasRelayServersConfigured = $derived(parseRelayServersInput(relayServersInput).length > 0);
   let ticketInput = $state("");
   let joinError: string | undefined = $state(undefined);
@@ -230,6 +228,32 @@
 
   onMount(() => {
     rngSeedInput = Math.floor(Date.now() / 1000);
+    relayServersInput = normalizeRelayServerList(relayServers).join("\n");
+    try {
+      playerNameInput = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? playerNameInput;
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? "null");
+      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+        if (SHAPE_KINDS.includes(saved.shapeKind)) shapeKindInput = saved.shapeKind;
+        if (["small", "medium", "large", "custom"].includes(saved.sizePreset))
+          sizePreset = saved.sizePreset;
+        if (Number.isInteger(saved.numCells) && saved.numCells >= 32 && saved.numCells <= 5000)
+          numCellsInput = saved.numCells;
+        if (
+          typeof saved.voidFraction === "number" &&
+          saved.voidFraction >= 0 &&
+          saved.voidFraction <= 0.999
+        )
+          voidFractionInput = saved.voidFraction;
+        if (typeof saved.spikiness === "number" && saved.spikiness >= 0 && saved.spikiness <= 1)
+          spikinessInput = saved.spikiness;
+        if (Number.isSafeInteger(saved.rngSeed) && saved.rngSeed >= 0) rngSeedInput = saved.rngSeed;
+        if (typeof saved.relayServers === "string") relayServersInput = saved.relayServers;
+        if (typeof saved.tutorialMode === "boolean") isTutorialMode = saved.tutorialMode;
+      }
+    } catch {
+      // Storage may be unavailable or contain malformed data; keep usable defaults.
+    }
+    settingsLoaded = true;
 
     const initializeWasm = async () => {
       try {
@@ -254,15 +278,6 @@
   });
 
   $effect(() => {
-    if (relayServersInitialized) {
-      return;
-    }
-
-    relayServersInput = normalizeRelayServerList(relayServers).join("\n");
-    relayServersInitialized = true;
-  });
-
-  $effect(() => {
     if (!gameState) return;
     setInitialCameraFov();
   });
@@ -274,11 +289,22 @@
   });
 
   $effect(() => {
-    if (typeof window !== "undefined") {
+    if (settingsLoaded) {
+      const settings = {
+        shapeKind: shapeKindInput,
+        sizePreset,
+        numCells: numCellsInput,
+        voidFraction: voidFractionInput,
+        spikiness: spikinessInput,
+        rngSeed: rngSeedInput,
+        relayServers: relayServersInput,
+        tutorialMode: isTutorialMode,
+      };
       try {
         localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerNameInput);
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
       } catch (error) {
-        console.warn("Failed to persist player name", error);
+        console.warn("Failed to persist game settings", error);
       }
     }
   });
@@ -494,7 +520,6 @@
     tutorial = undefined;
     exploredCellsSeen = new SvelteSet<number>();
     pendingTutorialClick = undefined;
-    rngSeedInput = Math.floor(Date.now() / 1000);
   }
 
   async function copyInviteTicket() {
@@ -945,7 +970,14 @@
 
 {#if gameState}
   <div id="game-canvas-container" style="height: 100vh; width: 100%;">
-    <Canvas colorSpace="srgb-linear">
+    <Canvas
+      colorSpace="srgb-linear"
+      renderMode="on-demand"
+      dpr={Math.min(devicePixelRatio.current ?? 1, 1.5)}
+      shadows={false}
+      createRenderer={(canvas) =>
+        new WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "default" })}
+    >
       <T.PerspectiveCamera
         makeDefault
         fov={cameraFov}
@@ -958,7 +990,6 @@
         bind:gameState
         {terrain}
         {surfaceArea}
-        {boundsRadius}
         interactive={tutorial?.isExplorationAllowed ?? true}
         highlightedCellIndex={tutorial?.highlightedCellIndex}
         onCellClicked={(cellIndex) => {
@@ -966,7 +997,6 @@
         }}
       />
       <OrbitControls
-        enableDamping
         enablePan={true}
         enableZoom={true}
         enableRotate={true}

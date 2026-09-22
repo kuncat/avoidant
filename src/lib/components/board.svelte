@@ -44,13 +44,13 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from "svelte";
+  import IdleBillboard from "./IdleBillboard.svelte";
   import { TerrainDepthSort } from "./terrain-depth-sort";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { Pulse } from "$lib/wasm/avoidant_wasm";
   import type { GameState } from "$lib/wasm/avoidant_wasm";
-  import { T, useThrelte } from "@threlte/core";
-  import { interactivity, Text, Billboard } from "@threlte/extras";
+  import { T, useTask, useThrelte } from "@threlte/core";
+  import { interactivity, Text } from "@threlte/extras";
   import {
     BufferAttribute,
     BufferGeometry,
@@ -76,7 +76,6 @@
       | undefined;
     flat?: boolean;
     surfaceArea?: number;
-    boundsRadius?: number;
     interactive?: boolean;
     highlightedCellIndex?: number | undefined;
     onCellClicked?: (cellIndex: number) => void;
@@ -87,7 +86,6 @@
     terrain = undefined,
     flat = false,
     surfaceArea = 0,
-    boundsRadius = 1,
     interactive = true,
     highlightedCellIndex = undefined,
     onCellClicked = undefined,
@@ -96,38 +94,6 @@
   let cellMetadata = $derived(gameState?.cellMetadata);
   let pulses = $derived(gameState?.uiState?.pulses);
   let nowMs = $state(0);
-
-  onMount(() => {
-    let rafId = 0;
-    const tick = () => {
-      const now = performance.now();
-      const hasActivePulses = $pulses.some((p) => now - p.createdAtMs < Math.max(1, p.durationMs));
-      const hasFallingCells = fallStart.size > 0;
-      const hasHighlight = highlightedCellIndex !== undefined;
-      if (hasActivePulses || hasFallingCells || hasHighlight) {
-        nowMs = now;
-
-        if (hasFallingCells) {
-          const meta = cellMeta;
-          for (const [cellIndex, startMs] of fallStart) {
-            const progress = Math.min(1, (now - startMs) / VOID_FALL_DURATION_MS);
-            meta.setFallProgress(cellIndex, progress);
-            if (progress >= 1) {
-              fallStart.delete(cellIndex);
-              fellCells.add(cellIndex);
-            }
-          }
-          meta.flush();
-        }
-
-        // Invalidate when remote state changes to draw a new frame.
-        invalidate();
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  });
 
   /**
    * Build a merged triangle mesh for all cell interiors from a Rust-side subdivided terrain payload.
@@ -591,6 +557,29 @@
     gameState.queueExplorePulse(cellIndex, event.point.x, event.point.y, event.point.z);
     onCellClicked?.(cellIndex);
   }
+  useTask(
+    () => {
+      const now = performance.now();
+      nowMs = now;
+      if (fallStart.size > 0) {
+        const meta = cellMeta;
+        for (const [cellIndex, startMs] of fallStart) {
+          const progress = Math.min(1, (now - startMs) / VOID_FALL_DURATION_MS);
+          meta.setFallProgress(cellIndex, progress);
+          if (progress >= 1) {
+            fallStart.delete(cellIndex);
+            fellCells.add(cellIndex);
+          }
+        }
+        meta.flush();
+      }
+      invalidate();
+    },
+    {
+      autoInvalidate: false,
+      running: () => $pulses.length > 0 || fallStart.size > 0 || highlightedCellIndex !== undefined,
+    },
+  );
 </script>
 
 <T is={opaqueMesh} />
@@ -600,7 +589,7 @@
   {#if entry.isExplored && !entry.isVoid && entry.voidNeighborCount > 0}
     {@const anchor = cellLabelAnchors[i]}
     {#if anchor}
-      <Billboard position={[anchor.x, anchor.y, anchor.z]}>
+      <IdleBillboard position={[anchor.x, anchor.y, anchor.z]}>
         <Text
           text={entry.voidNeighborCount.toLocaleString(getLocale())}
           font={openSans}
@@ -611,7 +600,7 @@
           outlineWidth={cellRadius * 0.04}
           outlineColor="#f8fafc"
         />
-      </Billboard>
+      </IdleBillboard>
     {/if}
   {/if}
 {/each}

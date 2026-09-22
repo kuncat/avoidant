@@ -33,6 +33,17 @@ void main() {
   // Once an explored void cell has fully fallen, drop every fragment.
   if (isVoid > 0.5 && isExplored > 0.5 && vFallProgress >= 0.999) discard;
 
+  // Unexplored cells retain slight transparency; revealed solid cells are opaque.
+  float alpha = isExplored > 0.5 ? 1.0 : 0.95;
+  // Fade alpha while an explored void cell is falling.
+  if (isVoid > 0.5 && isExplored > 0.5) {
+    alpha = clamp(1.0 - vFallProgress, 0.0, 1.0);
+  }
+
+  // Keep opaque depth separate from blended layers. The two passes must be
+  // mutually exclusive so no cell is drawn twice.
+  if (uTransparentPass ? alpha >= 1.0 : alpha < 1.0) discard;
+
   float elevation = remapClamped(vHeight, elevationMin, elevationMax, 0.0, 1.0);
 
   float totalRing = 0.0;
@@ -101,17 +112,6 @@ void main() {
   float borderWidth = max(0.04, 1.1 * edgePixel);
   float border = 1.0 - smoothstep(borderWidth, borderWidth + edgePixel, vEdgeDistance);
   finalColor = mix(finalColor, vec3(0.1, 0.13, 0.18), border * 0.9);
-
-  // Unexplored cells retain slight transparency; revealed solid cells are opaque.
-  float alpha = isExplored > 0.5 ? 1.0 : 0.95;
-  // Fade alpha while an explored void cell is falling.
-  if (isVoid > 0.5 && isExplored > 0.5) {
-    alpha = clamp(1.0 - vFallProgress, 0.0, 1.0);
-  }
-
-  // Keep opaque depth separate from blended layers. The two passes must be
-  // mutually exclusive so no cell is drawn twice.
-  if (uTransparentPass ? alpha >= 1.0 : alpha < 1.0) discard;
 
   gl_FragColor = vec4(clamp(finalColor, 0.0, 1.0), alpha);
 }
