@@ -4,6 +4,11 @@
   import { PULSE_SWEEP_BAND } from "$lib/generated/shared-constants";
   import openSans from "$lib/assets/OpenSans-VariableFont_wdth,wght.ttf?url";
   import { getLocale } from "$lib/paraglide/runtime";
+  import { installTroikaWebGL2AtlasFix } from "$lib/troika-webgl2-atlas";
+
+  // Must run before troika-three-text (`<Text>`) creates its SDF atlas canvas so it
+  // gets a WebGL 2 context. Works around Brave dropping ANGLE_instanced_arrays.
+  installTroikaWebGL2AtlasFix();
 
   export const MAX_PULSES = 16;
   export const VOID_FALL_DURATION_MS = 900;
