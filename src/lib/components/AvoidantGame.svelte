@@ -405,6 +405,8 @@
   ];
 
   async function startGame() {
+    if (status) return;
+    let nextGameState: GameState | undefined;
     try {
       const relayUrls = parseRelayServersInput($state.snapshot(relayServersInput));
       const options: GameOptions = {
@@ -418,10 +420,13 @@
         voidFraction: $state.snapshot(voidFractionInput),
       };
       status = m.status_generating_map();
-      isFlatMap = options.shape?.kind === "flat";
-      gameState = new GameState(options);
+      setupMode = undefined;
       const generated = await generateMap(options);
-      gameState.applyMapCells(generated.cells);
+      nextGameState = new GameState(options);
+      nextGameState.applyMapCells(generated.cells);
+      // Publish only a complete map: mounting an empty game while old terrain
+      // remains makes the board look up terrain indices in an empty cell list.
+      isFlatMap = options.shape?.kind === "flat";
       terrain = generated.terrain;
       surfaceArea = generated.surfaceArea;
       boundsRadius = generated.boundsRadius;
@@ -429,7 +434,9 @@
       exploredCellsSeen = new SvelteSet<number>();
       pendingTutorialClick = undefined;
       tutorial = isTutorialMode ? new TutorialState() : undefined;
+      gameState = nextGameState;
     } catch (error) {
+      nextGameState?.free();
       console.error("Failed to start game", error);
     } finally {
       setupMode = undefined;
@@ -512,6 +519,9 @@
       console.error("Failed to release game state", error);
     }
     gameState = undefined;
+    terrain = undefined;
+    surfaceArea = 0;
+    boundsRadius = DEFAULT_RADIUS;
     setupMode = undefined;
     inviteTicket = "";
     ticketInput = "";
@@ -679,7 +689,7 @@
       <p class="mt-2 text-sm text-slate-600!">{status}</p>
     {/if}
 
-    {#if !gameState}
+    {#if !gameState && !status}
       {#if setupMode === "host"}
         <form
           class="mt-4 w-full"
