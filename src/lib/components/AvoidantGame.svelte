@@ -84,6 +84,11 @@
   let voidFractionInput = $state(0.15625);
   let spikinessInput = $state(0.8);
   let rngSeedInput = $state(0);
+  let randomSeed = $state(true);
+
+  function resetRandomSeed() {
+    rngSeedInput = crypto.getRandomValues(new Uint32Array(1))[0];
+  }
   // Shape selection state. The shape kind drives which numeric inputs are shown; each per-shape numeric value persists independently so switching back and forth doesn't reset the user's edits.
   let shapeKindInput = $state<ShapeKind>("icosahedron");
   let playerNameInput = $state<string>(m.default_player_name());
@@ -227,7 +232,7 @@
   }
 
   onMount(() => {
-    rngSeedInput = Math.floor(Date.now() / 1000);
+    resetRandomSeed();
     relayServersInput = normalizeRelayServerList(relayServers).join("\n");
     try {
       playerNameInput = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? playerNameInput;
@@ -246,7 +251,9 @@
           voidFractionInput = saved.voidFraction;
         if (typeof saved.spikiness === "number" && saved.spikiness >= 0 && saved.spikiness <= 1)
           spikinessInput = saved.spikiness;
-        if (Number.isSafeInteger(saved.rngSeed) && saved.rngSeed >= 0) rngSeedInput = saved.rngSeed;
+        randomSeed = saved.randomSeed !== false;
+        if (!randomSeed && Number.isSafeInteger(saved.rngSeed) && saved.rngSeed >= 0)
+          rngSeedInput = saved.rngSeed;
         if (typeof saved.relayServers === "string") relayServersInput = saved.relayServers;
         if (typeof saved.tutorialMode === "boolean") isTutorialMode = saved.tutorialMode;
       }
@@ -296,7 +303,8 @@
         numCells: numCellsInput,
         voidFraction: voidFractionInput,
         spikiness: spikinessInput,
-        rngSeed: rngSeedInput,
+        randomSeed,
+        rngSeed: randomSeed ? undefined : rngSeedInput,
         relayServers: relayServersInput,
         tutorialMode: isTutorialMode,
       };
@@ -409,6 +417,7 @@
     let nextGameState: GameState | undefined;
     try {
       const relayUrls = parseRelayServersInput($state.snapshot(relayServersInput));
+      if (randomSeed) resetRandomSeed();
       const options: GameOptions = {
         elevationMax: 6.0,
         elevationMin: 0.0,
@@ -844,14 +853,33 @@
                     <p class="field-help">{m.text_relay_servers_hint()}</p>
                     <div class="mt-6 w-full">
                       <label class="field-label" for="rng-seed-input">{m.field_seed()}</label>
-                      <input
-                        class="field"
-                        id="rng-seed-input"
-                        type="number"
-                        inputmode="numeric"
-                        bind:value={rngSeedInput}
-                        min="0"
-                      />
+                      <div class="mb-3 flex">
+                        <input
+                          class="field mb-0! min-w-0 rounded-r-none! disabled:opacity-60"
+                          id="rng-seed-input"
+                          type="number"
+                          inputmode="numeric"
+                          bind:value={rngSeedInput}
+                          disabled={randomSeed}
+                          min="0"
+                          max={Number.MAX_SAFE_INTEGER}
+                          step="1"
+                          required
+                        />
+                        <button
+                          type="button"
+                          class="btn shrink-0 rounded-l-none! text-xl"
+                          class:btn-primary={randomSeed}
+                          class:btn-secondary={!randomSeed}
+                          title={m.action_random()}
+                          aria-label={m.action_random()}
+                          aria-pressed={randomSeed}
+                          onclick={() => {
+                            randomSeed = !randomSeed;
+                            if (randomSeed) resetRandomSeed();
+                          }}><span aria-hidden="true">⚄</span></button
+                        >
+                      </div>
                     </div>
                   </div>
                 {/if}

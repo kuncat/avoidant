@@ -34,6 +34,7 @@
   "field_radius_y": "Radius Y",
   "field_radius_z": "Radius Z",
   "field_relay_servers": "Iroh Relay Servers",
+  "action_random": "Random",
   "field_seed": "RNG Seed",
   "field_size": "Size",
   "field_spikiness": "Spikiness",

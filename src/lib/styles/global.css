@@ -52,7 +52,8 @@ h1 {
 }
 
 .panel-card {
-  @apply rounded bg-slate-300 px-6 text-center shadow-xl;
+  @apply overflow-y-auto overscroll-y-contain rounded bg-slate-300 px-6 text-center shadow-xl;
+  max-height: calc(100dvh - 2rem);
 }
 
 .panel-header {
