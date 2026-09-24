@@ -588,7 +588,7 @@
 </script>
 
 <T is={opaqueMesh} />
-<T is={terrainMesh} onclick={handleTerrainClick} />
+<T is={terrainMesh} name="terrain" onclick={handleTerrainClick} />
 
 {#each $cellMetadata as entry, i (i)}
   {#if entry.isExplored && !entry.isVoid && entry.voidNeighborCount > 0}

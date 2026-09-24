@@ -10,8 +10,8 @@
     type MapShape,
   } from "$lib/wasm/avoidant_wasm";
   import { Canvas, T } from "@threlte/core";
-  import { OrbitControls } from "@threlte/extras";
-  import { MOUSE, TOUCH, WebGLRenderer } from "three";
+  import MapControls from "./MapControls.svelte";
+  import { WebGLRenderer } from "three";
   import Board from "$lib/components/board.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, locales, setLocale } from "$lib/paraglide/runtime";
@@ -996,14 +996,7 @@
           if (tutorial) pendingTutorialClick = cellIndex;
         }}
       />
-      <OrbitControls
-        enablePan={true}
-        enableZoom={true}
-        enableRotate={true}
-        mouseButtons={{ LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE }}
-        target={[0, 0, 0]}
-        touches={{ ONE: TOUCH.PAN, TWO: TOUCH.DOLLY_ROTATE }}
-      />
+      <MapControls flat={isFlatMap} radius={boundsRadius} />
     </Canvas>
   </div>
 {/if}
