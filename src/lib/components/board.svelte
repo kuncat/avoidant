@@ -49,6 +49,7 @@
 </script>
 
 <script lang="ts">
+  import { labelSurfacePoints } from "./label-connectors";
   import IdleBillboard from "./IdleBillboard.svelte";
   import { TerrainDepthSort } from "./terrain-depth-sort";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -59,6 +60,7 @@
   import {
     BufferAttribute,
     BufferGeometry,
+    Color,
     DataTexture,
     DoubleSide,
     Mesh,
@@ -486,6 +488,43 @@
     }),
   );
 
+  // Intersect the elevated, inset terrain rather than extending to the base
+  // centroid below it. Compute these once per map, not on every cell reveal.
+  const cellLabelSurfacePoints = $derived(
+    labelSurfacePoints(
+      terrainGeometry,
+      cellLabelAnchors.map((anchor) => new Vector3(anchor.x, anchor.y, anchor.z)),
+      $cells.map((cell) => new Vector3(...cell.centroid)),
+    ),
+  );
+
+  // Keep connectors in world space: only the text should turn to face the camera.
+  // Batch all visible labels into one draw call, with depth testing so lines on
+  // the far side of the map remain hidden behind the terrain.
+  const labelConnectorGeometry = $derived.by(() => {
+    const points: Vector3[] = [];
+    const colors: number[] = [];
+    for (let i = 0; i < $cellMetadata.length; i++) {
+      const entry = $cellMetadata[i];
+      const anchor = cellLabelAnchors[i];
+      const surface = cellLabelSurfacePoints[i];
+      if (!entry.isExplored || entry.isVoid || entry.voidNeighborCount <= 0 || !anchor || !surface)
+        continue;
+      points.push(surface, new Vector3(anchor.x, anchor.y, anchor.z));
+      const color = new Color(
+        LABEL_COLORS[Math.min(entry.voidNeighborCount, LABEL_COLORS.length - 1)],
+      );
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+    }
+    const geometry = new BufferGeometry().setFromPoints(points);
+    geometry.setAttribute("color", new BufferAttribute(new Float32Array(colors), 3));
+    return geometry;
+  });
+  $effect(() => {
+    const geometry = labelConnectorGeometry;
+    return () => geometry.dispose();
+  });
+
   const LABEL_COLORS = [
     undefined,
     "#1d4ed8",
@@ -589,6 +628,9 @@
 
 <T is={opaqueMesh} />
 <T is={terrainMesh} name="terrain" onclick={handleTerrainClick} />
+<T.LineSegments geometry={labelConnectorGeometry}>
+  <T.LineBasicMaterial vertexColors depthWrite={false} />
+</T.LineSegments>
 
 {#each $cellMetadata as entry, i (i)}
   {#if entry.isExplored && !entry.isVoid && entry.voidNeighborCount > 0}
