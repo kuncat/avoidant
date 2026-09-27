@@ -11,7 +11,7 @@ mod terrain;
 mod vec3;
 
 use serde::{Deserialize, Serialize};
-use tsify::Tsify;
+use tsify::{Ts, Tsify};
 use wasm_bindgen::JsValue;
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -28,7 +28,6 @@ use vec3::V3;
 /// Map surface shape. Serialized as a tagged JS union; on the TS side this
 /// becomes a discriminated union by `kind`.
 #[derive(Clone, Debug, Serialize, Deserialize, Tsify)]
-#[tsify(from_wasm_abi, into_wasm_abi)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -99,7 +98,10 @@ pub(crate) struct GeneratedMap {
 
 /// Build map cells and the subdivided terrain triangle mesh.
 #[wasm_bindgen(js_name = "generateMapData")]
-pub fn generate_map_data_js(options: GameOptions) -> Result<MapData, JsValue> {
+pub fn generate_map_data_js(options: Ts<GameOptions>) -> Result<Ts<MapData>, JsValue> {
+    let options = options
+        .to_rust()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
     let shape = options.shape.clone().unwrap_or_default();
     let spikiness = options.spikiness.unwrap_or(0.4).clamp(0.0, 1.0);
     let elev_min = options.elevation_min.unwrap_or(-0.4);
@@ -129,12 +131,14 @@ pub fn generate_map_data_js(options: GameOptions) -> Result<MapData, JsValue> {
         matches!(shape, MapShape::Flat { .. }),
     );
 
-    Ok(MapData {
+    MapData {
         cells: generated.cells,
         terrain,
         surface_area: generated.surface_area,
         bounds_radius: generated.bounds_radius,
-    })
+    }
+    .into_ts()
+    .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
 pub(crate) fn generate_map(

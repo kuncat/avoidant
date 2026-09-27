@@ -120,7 +120,7 @@ pub(crate) fn sample_face_sites(
     let offset_v = frame.aabb_min.1;
 
     for radius_try in 0..8u64 {
-        let mut noise = BlueNoise::<Xoshiro256PlusPlus>::from_seed(
+        let mut noise = BlueNoise::<rand_xoshiro07::Xoshiro256PlusPlus>::from_seed(
             width,
             height,
             min_radius,
@@ -153,8 +153,12 @@ pub(crate) fn sample_face_sites(
     }
 
     // Last resort: accept whatever we have.
-    let mut noise =
-        BlueNoise::<Xoshiro256PlusPlus>::from_seed(width, height, min_radius, seed ^ 0xDEAD_BEEF);
+    let mut noise = BlueNoise::<rand_xoshiro07::Xoshiro256PlusPlus>::from_seed(
+        width,
+        height,
+        min_radius,
+        seed ^ 0xDEAD_BEEF,
+    );
     noise.with_samples(POISSON_MAX_SAMPLES);
     noise
         .filter_map(|point| {

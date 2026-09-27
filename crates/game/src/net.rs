@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
-use n0_future::{StreamExt, time::Duration};
+use n0_future::StreamExt;
 use networking::{EndpointId, GameInviter, GameTicket, TopicId};
 use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
@@ -169,13 +169,6 @@ impl Channel {
             .map(|x| x.to_string())
             .collect()
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PeerInfo {
-    pub endpoint_id: EndpointId,
-    pub nickname: String,
-    pub last_active: Duration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

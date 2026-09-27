@@ -70,7 +70,7 @@ export function orbitRadiansPerPixel(
   );
   const visibleHeight = 2 * Math.tan((camera.getEffectiveFOV() * Math.PI) / 360) * surfaceDistance;
   // The vertical FOV includes the aspect-ratio adjustment on narrow screens.
-  return 2 * Math.min(Math.PI * 2, visibleHeight / mapRadius) / Math.max(1, viewportHeight);
+  return (2 * Math.min(Math.PI * 2, visibleHeight / mapRadius)) / Math.max(1, viewportHeight);
 }
 
 /** Move the grabbed surface point with the pointer without changing the orbit center. */

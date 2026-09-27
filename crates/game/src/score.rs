@@ -13,7 +13,6 @@ pub const STREAK_BONUS_CAP_STEPS: u32 = 10;
 pub const COMPLETION_BONUS_FRACTION: f64 = 0.25;
 
 #[derive(Clone, Default, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct ScoreState {
     /// Risk-balanced point total. May be negative.

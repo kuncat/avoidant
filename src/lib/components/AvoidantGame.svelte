@@ -848,8 +848,7 @@
                       id="relay-servers"
                       bind:value={relayServersInput}
                       rows="4"
-                      spellcheck="false"
-                    ></textarea>
+                      spellcheck="false"></textarea>
                     <p class="field-help">{m.text_relay_servers_hint()}</p>
                     <div class="mt-6 w-full">
                       <label class="field-label" for="rng-seed-input">{m.field_seed()}</label>

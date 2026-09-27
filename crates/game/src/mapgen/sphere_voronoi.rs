@@ -34,7 +34,7 @@ pub(crate) fn fibonacci_sphere(n: usize, seed: u64) -> Vec<V3> {
     if n == 0 {
         return Vec::new();
     }
-    use rand::RngCore;
+    use rand::Rng;
     // Per-seed angular offset (rotates the spiral around the polar axis) so
     // different seeds yield rotated point sets.
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);

@@ -34,10 +34,12 @@ describe("cellMetaDefines", () => {
     }
   });
 
-  it("emits CELL_META_<NAME> matching each channel's offset", () => {
-    for (const [name, offset] of Object.entries(CellMetaChannel)) {
-      const macro = `#define CELL_META_${name.toUpperCase()} ${offset}`;
-      expect(cellMetaDefines).toContain(macro);
-    }
+  it("emits the channel macros consumed by the shaders", () => {
+    expect(cellMetaDefines).toContain(`#define CELL_META_EXPLORED ${CellMetaChannel.Explored}`);
+    expect(cellMetaDefines).toContain(`#define CELL_META_VOID ${CellMetaChannel.Void}`);
+    expect(cellMetaDefines).toContain(
+      `#define CELL_META_FALL_PROGRESS ${CellMetaChannel.FallProgress}`,
+    );
+    expect(cellMetaDefines).toContain(`#define CELL_META_REVEALING ${CellMetaChannel.Revealing}`);
   });
 });

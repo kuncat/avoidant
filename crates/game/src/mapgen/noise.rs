@@ -5,7 +5,7 @@
 //! exact same point on their shared edge get identical displacement values,
 //! so the rendered seam is wiggly but seamless.
 
-use rand::RngCore;
+use rand::Rng;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
@@ -78,7 +78,7 @@ fn lattice_random(ix: i64, iy: i64, iz: i64, seed: u64) -> f64 {
     next_unit_f64(&mut rng) * 2.0 - 1.0
 }
 
-fn next_unit_f64(rng: &mut impl RngCore) -> f64 {
+fn next_unit_f64(rng: &mut impl Rng) -> f64 {
     let value = rng.next_u64() >> 11;
     (value as f64) * (1.0 / ((1u64 << 53) as f64))
 }

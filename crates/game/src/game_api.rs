@@ -5,6 +5,7 @@ use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use svelte_store::Readable;
+use tsify::{Ts, Tsify};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
 use crate::mutation::{Mutation, MutationOrigin};
@@ -19,7 +20,10 @@ use networking::GameTicket;
 #[wasm_bindgen]
 impl GameState {
     #[wasm_bindgen(constructor)]
-    pub fn new(options: GameOptions) -> Result<GameState, JsValue> {
+    pub fn new(options: Ts<GameOptions>) -> Result<GameState, JsValue> {
+        let options = options
+            .to_rust()
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
         utils::set_panic_hook();
 
         let options_value = serde_wasm_bindgen::to_value(&options)?;
@@ -127,8 +131,14 @@ impl GameState {
     }
 
     #[wasm_bindgen(getter, js_name = "networkPeers")]
-    pub fn network_peers(&self) -> Vec<NetworkPeerStatus> {
+    pub fn network_peers(&self) -> Result<Vec<Ts<NetworkPeerStatus>>, JsValue> {
         self.collect_network_peers()
+            .iter()
+            .map(|peer| {
+                peer.into_ts()
+                    .map_err(|error| JsValue::from_str(&error.to_string()))
+            })
+            .collect()
     }
 
     pub(crate) fn collect_network_peers(&self) -> Vec<NetworkPeerStatus> {
@@ -314,7 +324,7 @@ impl GameState {
     }
 
     #[wasm_bindgen(js_name = "optionsFromTicket")]
-    pub fn options_from_ticket(ticket: String) -> Result<GameOptions, JsValue> {
+    pub fn options_from_ticket(ticket: String) -> Result<Ts<GameOptions>, JsValue> {
         let parsed_ticket = GameTicket::deserialize(&ticket)
             .map_err(|err| JsValue::from_str(&format!("Invalid game ticket: {err}")))?;
         let options_json = parsed_ticket
@@ -330,7 +340,9 @@ impl GameState {
                 "Incompatible invitation; ask the host to create a new invite",
             ));
         }
-        Ok(options)
+        options
+            .into_ts()
+            .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
     /// Spawn a network node and join the gossip topic described by `ticket`.

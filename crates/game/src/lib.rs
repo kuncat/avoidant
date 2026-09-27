@@ -35,7 +35,6 @@ import type { Readable } from "svelte/store";
 "#;
 
 #[derive(Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct MapCell {
     /// True 3D world-space polygon vertices on (or just above) the map
@@ -54,7 +53,6 @@ pub struct MapCell {
 }
 
 #[derive(Clone, Serialize, Deserialize, Tsify)]
-#[tsify(from_wasm_abi, into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct CellMetadataEntry {
     is_explored: bool,
@@ -65,7 +63,6 @@ pub struct CellMetadataEntry {
 }
 
 #[derive(Clone, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkPeerStatus {
     endpoint_id: String,
@@ -77,7 +74,6 @@ pub struct NetworkPeerStatus {
 }
 
 #[derive(Clone, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkSnapshot {
     pub(crate) has_node: bool,
@@ -101,7 +97,6 @@ pub(crate) struct PeerPresenceEntry {
 }
 
 #[derive(Serialize, Deserialize, Tsify)]
-#[tsify(from_wasm_abi, into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct GameOptions {
     num_cells: u64,
@@ -143,7 +138,6 @@ pub struct GameOptions {
 ///
 /// `positions` is a `[x, y, z]`-packed `f32` array (length is a multiple of 9 (3 verts per triangle, 3 floats per vert). `normals` is `[nx, ny, nz]`) packed and parallel to `positions`; each vertex carries a smooth normal derived analytically from the noise field so the shader can per-pixel-interpolate it and avoid faceted flat shading. `cell_indices` carries the owning cell index for each emitted vertex (length = `positions.len() / 3`). `heights` is the scalar elevation displacement per vertex (the raw value sampled from the noise field along the cell's outward normal); the shader uses it for the elevation color ramp. Built once per map by [`crate::mapgen::generate_terrain_triangles`].
 #[derive(Default, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrainTriangles {
     pub positions: Vec<f32>,
@@ -154,7 +148,6 @@ pub struct TerrainTriangles {
 
 /// Voronoi cell polygons paired with the subdivided terrain triangle mesh.
 #[derive(Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct MapData {
     pub cells: Vec<MapCell>,

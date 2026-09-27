@@ -195,7 +195,7 @@ mod wasm_tests {
                 r#"{"numCells":80,"rngSeed":42,"firstSafeCell":0,"authority":"host","syncVersion":1}"#
             } else { r#"{"numCells":80,"rngSeed":42}"# }
         ).unwrap()).unwrap();
-        let mut game = GameState::new(options).unwrap();
+        let mut game = GameState::new(tsify::Ts::from_rust(&options).unwrap()).unwrap();
         let cells = crate::mapgen::generate_map(80, 42, &MapShape::Icosahedron { radius: 50.0 })
             .unwrap()
             .cells;
