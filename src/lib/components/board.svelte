@@ -49,7 +49,7 @@
 </script>
 
 <script lang="ts">
-  import { labelSurfacePoints } from "./label-connectors";
+  import { cellLabelPlacements } from "./label-connectors";
   import IdleBillboard from "./IdleBillboard.svelte";
   import { TerrainDepthSort } from "./terrain-depth-sort";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -462,41 +462,14 @@
   });
 
   const LABEL_LIFT_FACTOR = 0.4;
-  /// Maximum per-vertex elevation displacement (raw scalar from the noise field) seen inside each cell, used to lift labels above the noisiest part of the terrain.
-  const terrainCellMaxHeights = $derived.by(() => {
-    const result: number[] = new Array($cells.length).fill(0);
-    if (!terrain) return result;
-    const heights = terrain.heights;
-    const cellIndices = terrain.cellIndices;
-    for (let i = 0; i < cellIndices.length; i++) {
-      const ci = cellIndices[i];
-      const h = heights[i];
-      if (h > result[ci]) result[ci] = h;
-    }
-    return result;
-  });
-  const cellLabelAnchors = $derived(
-    $cells.map((cell, idx) => {
-      const [cxv, cyv, czv] = cell.centroid;
-      const [nx, ny, nz] = cell.normal;
-      const lift = (terrainCellMaxHeights[idx] ?? 0) + cellRadius * LABEL_LIFT_FACTOR;
-      return {
-        x: cxv + nx * lift,
-        y: cyv + ny * lift,
-        z: czv + nz * lift,
-      };
-    }),
-  );
-
-  // Intersect the elevated, inset terrain rather than extending to the base
-  // centroid below it. Compute these once per map, not on every cell reveal.
-  const cellLabelSurfacePoints = $derived(
-    labelSurfacePoints(
+  const labelPlacements = $derived(
+    cellLabelPlacements(
       terrainGeometry,
-      cellLabelAnchors.map((anchor) => new Vector3(anchor.x, anchor.y, anchor.z)),
-      $cells.map((cell) => new Vector3(...cell.centroid)),
+      $cells.map((cell) => new Vector3(...cell.normal)),
+      cellRadius * LABEL_LIFT_FACTOR,
     ),
   );
+  const cellLabelAnchors = $derived(labelPlacements.map((placement) => placement?.anchor));
 
   // Keep connectors in world space: only the text should turn to face the camera.
   // Batch all visible labels into one draw call, with depth testing so lines on
@@ -507,7 +480,7 @@
     for (let i = 0; i < $cellMetadata.length; i++) {
       const entry = $cellMetadata[i];
       const anchor = cellLabelAnchors[i];
-      const surface = cellLabelSurfacePoints[i];
+      const surface = labelPlacements[i]?.surface;
       if (!entry.isExplored || entry.isVoid || entry.voidNeighborCount <= 0 || !anchor || !surface)
         continue;
       points.push(surface, new Vector3(anchor.x, anchor.y, anchor.z));

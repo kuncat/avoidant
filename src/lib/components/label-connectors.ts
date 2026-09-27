@@ -1,11 +1,11 @@
 import { BufferGeometry, Ray, Triangle, Vector3 } from "three";
 
-/** Find actual terrain endpoints, keeping edge labels attached to their own cell. */
-export function labelSurfacePoints(
+/** Center each label on its cell's exposed mesh, aligned with the base face normal. */
+export function cellLabelPlacements(
   geometry: BufferGeometry,
-  anchors: Vector3[],
-  centers: Vector3[],
-): (Vector3 | undefined)[] {
+  normals: Vector3[],
+  clearance: number,
+): ({ surface: Vector3; anchor: Vector3 } | undefined)[] {
   const positions = geometry.getAttribute("position");
   const cellIndices = geometry.getAttribute("aCellIndex");
   const triangles = new Map<number, Triangle[]>();
@@ -25,44 +25,54 @@ export function labelSurfacePoints(
     else triangles.set(cell, [triangle]);
   }
 
-  return anchors.map((anchor, cell) => {
-    const surface = triangles.get(cell);
-    const center = centers[cell];
-    if (!surface || !center) return undefined;
-    const ray = new Ray(anchor, center.clone().sub(anchor).normalize());
+  return normals.map((faceNormal, cell) => {
+    const mesh = triangles.get(cell);
+    if (!mesh || !faceNormal.lengthSq()) return undefined;
+    const normal = faceNormal.clone().normalize();
+    const centroid = new Vector3();
+    const midpoint = new Vector3();
+    let area = 0;
+    let top = -Infinity;
+    for (const triangle of mesh) {
+      const weight = triangle.getArea();
+      centroid.addScaledVector(triangle.getMidpoint(midpoint), weight);
+      area += weight;
+      top = Math.max(top, triangle.a.dot(normal), triangle.b.dot(normal), triangle.c.dot(normal));
+    }
+    if (!area) return undefined;
+    centroid.divideScalar(area);
+
+    // A curved mesh's area centroid may lie inside the terrain. Project outward
+    // along the face normal, then intersect back onto the exposed surface.
+    const gap = Math.max(clearance, 1e-6);
+    const anchor = centroid.clone().addScaledVector(normal, top + gap - centroid.dot(normal));
+    const ray = new Ray(anchor, normal.clone().negate());
     const hit = new Vector3();
-    function firstHit() {
-      let nearest: Vector3 | undefined;
-      let distance = Infinity;
-      for (const triangle of surface!) {
-        if (!ray.intersectTriangle(triangle.a, triangle.b, triangle.c, false, hit)) continue;
-        const candidateDistance = anchor.distanceToSquared(hit);
-        if (candidateDistance < distance) {
-          distance = candidateDistance;
-          nearest = hit.clone();
+    let surface: Vector3 | undefined;
+    let nearest = Infinity;
+    for (const triangle of mesh) {
+      if (!ray.intersectTriangle(triangle.a, triangle.b, triangle.c, false, hit)) continue;
+      const distance = anchor.distanceToSquared(hit);
+      if (distance < nearest) {
+        nearest = distance;
+        surface = hit.clone();
+      }
+    }
+    if (!surface) {
+      // For a non-convex cell or inset gap, use its nearest surface point and
+      // move the label with it so the connector never tilts away from the normal.
+      nearest = Infinity;
+      for (const triangle of mesh) {
+        triangle.closestPointToPoint(centroid, hit);
+        const distance = centroid.distanceToSquared(hit);
+        if (distance < nearest) {
+          nearest = distance;
+          surface = hit.clone();
         }
       }
-      return nearest;
     }
-    // A polyhedron edge's base centroid can lie above the inset triangles.
-    // Do not stop the search at that centroid.
-    const direct = firstHit();
-    if (direct) return direct;
-
-    // If the ray falls in an inset gap, attach to the nearest point on this
-    // cell's surface instead of dropping the connector or hitting a neighbor.
-    let closest: Vector3 | undefined;
-    let distance = Infinity;
-    for (const triangle of surface) {
-      triangle.closestPointToPoint(center, hit);
-      const candidateDistance = center.distanceToSquared(hit);
-      if (candidateDistance < distance) {
-        distance = candidateDistance;
-        closest = hit.clone();
-      }
-    }
-    if (!closest) return undefined;
-    ray.direction.copy(closest).sub(anchor).normalize();
-    return firstHit() ?? closest;
+    if (!surface) return undefined;
+    anchor.copy(surface).addScaledVector(normal, top + gap - surface.dot(normal));
+    return { surface, anchor };
   });
 }
