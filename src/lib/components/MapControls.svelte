@@ -107,7 +107,7 @@
         const dx = event.clientX - previous.x;
         const dy = event.clientY - previous.y;
         if (previous.button === 1) zoom(event.clientX, event.clientY, dy * 0.01);
-        else if (event.shiftKey) rotate(dx, dy);
+        else if (previous.button === 2 || event.shiftKey) rotate(dx, dy);
         else pan(previous.x, previous.y, event.clientX, event.clientY);
       }
     }
