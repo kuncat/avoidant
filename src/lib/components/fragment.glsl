@@ -9,6 +9,7 @@ uniform bool uTransparentPass;
 uniform float elevationMin;
 uniform float elevationMax;
 uniform sampler2D uCellMeta;
+uniform sampler2D uOwnership;
 uniform float uCellMetaSize;
 uniform int pulseCount;
 uniform float pulseTimers[MAX_PULSES];
@@ -22,6 +23,26 @@ uniform float uTime;
 float remapClamped(float value, float inMin, float inMax, float outMin, float outMax) {
   float t = clamp((value - inMin) / max(inMax - inMin, 0.0001), 0.0, 1.0);
   return mix(outMin, outMax, t);
+}
+
+// Screen-space patterns stay legible at any zoom, use the existing ownership
+// texture, and add no meshes, draw calls, or per-frame texture uploads.
+float stripe(float x) {
+  float d = abs(fract(x) - 0.5);
+  return 1.0 - smoothstep(0.1, 0.1 + max(fwidth(x), 0.025), d);
+}
+float territoryPattern(float owner, vec2 p) {
+  if (owner < 1.5) return stripe(p.x + p.y);
+  if (owner < 2.5) return stripe(p.x - p.y);
+  if (owner < 3.5) return max(stripe(p.x + p.y), stripe(p.x - p.y));
+  if (owner < 4.5) {
+    float d = length(fract(p) - 0.5);
+    return 1.0 - smoothstep(0.14, 0.23, d);
+  }
+  if (owner < 5.5) return stripe(p.y) * step(0.35, fract(p.x * 0.5));
+  if (owner < 6.5) return stripe(p.y + abs(fract(p.x * 0.5) - 0.5) * 2.0);
+  if (owner < 7.5) return max(stripe(p.x), stripe(p.y));
+  return stripe(p.y + sin(p.x * 3.14159) * 0.3);
 }
 
 void main() {
@@ -87,6 +108,13 @@ void main() {
   vec3 lowColor = mix(unexploredLow, exploredLow, colorFactor);
   vec3 highColor = mix(unexploredHigh, exploredHigh, colorFactor);
   vec3 terrainColor = mix(lowColor, highColor, elevation);
+  vec4 ownership = texture2D(uOwnership, metaUv);
+  float owner = floor(ownership.a * 255.0 + 0.5);
+  if (owner > 0.5) {
+    terrainColor = mix(terrainColor, ownership.rgb, 0.7);
+    float pattern = territoryPattern(owner, gl_FragCoord.xy / 12.0);
+    terrainColor = mix(terrainColor, terrainColor * 0.45, pattern * 0.65);
+  }
 
   // Uniform illumination keeps every face readable regardless of its
   // orientation, with a subdued level that avoids near-white revealed cells.

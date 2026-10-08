@@ -1,0 +1,12 @@
+{
+  "name": "avoidant-competitive",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "durable_objects": { "bindings": [{ "name": "MATCHES", "class_name": "MatchRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MatchRoom"] }],
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4321",
+    "ACCOUNT_API": "http://localhost:8788",
+    "REQUIRE_ENTITLEMENT": "false",
+  },
+}

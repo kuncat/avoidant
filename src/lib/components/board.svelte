@@ -54,7 +54,8 @@
   import { TerrainDepthSort } from "./terrain-depth-sort";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { Pulse } from "$lib/wasm/avoidant_wasm";
-  import type { GameState } from "$lib/wasm/avoidant_wasm";
+  import type { BoardState } from "$lib/multiplayer/types";
+  import { PLAYER_COLORS } from "$lib/multiplayer/types";
   import { T, useTask, useThrelte } from "@threlte/core";
   import { interactivity, Text } from "@threlte/extras";
   import {
@@ -77,7 +78,9 @@
   const { invalidate } = useThrelte();
 
   interface Props {
-    gameState: GameState;
+    gameState: BoardState;
+    owners?: (number | null)[];
+    showZeroCounts?: boolean;
     terrain?:
       | { positions: number[]; normals: number[]; cellIndices: number[]; heights: number[] }
       | undefined;
@@ -96,6 +99,8 @@
     interactive = true,
     highlightedCellIndex = undefined,
     onCellClicked = undefined,
+    owners = [],
+    showZeroCounts = false,
   }: Props = $props();
   let cells = $derived(gameState?.cells);
   let cellMetadata = $derived(gameState?.cellMetadata);
@@ -395,6 +400,43 @@
     };
   });
 
+  const ownershipTexture = $derived.by(() => {
+    const texture = new DataTexture(
+      new Uint8Array(cellMeta.width * 4),
+      cellMeta.width,
+      1,
+      RGBAFormat,
+      UnsignedByteType,
+    );
+    texture.minFilter = NearestFilter;
+    texture.magFilter = NearestFilter;
+    return texture;
+  });
+  $effect(() => {
+    const texture = ownershipTexture;
+    const data = texture.image.data as Uint8Array;
+    data.fill(0);
+    owners.forEach((owner, index) => {
+      if (owner === null || index >= $cells.length) return;
+      const color = new Color(PLAYER_COLORS[owner]);
+      data.set(
+        [
+          Math.round(color.r * 255),
+          Math.round(color.g * 255),
+          Math.round(color.b * 255),
+          owner + 1,
+        ],
+        index * 4,
+      );
+    });
+    texture.needsUpdate = true;
+    invalidate();
+  });
+  $effect(() => {
+    const texture = ownershipTexture;
+    return () => texture.dispose();
+  });
+
   let terrainMaterial = $derived(
     new ShaderMaterial({
       vertexShader,
@@ -409,6 +451,7 @@
         elevationMin: { value: gameState.elevationMin },
         elevationMax: { value: gameState.elevationMax },
         uCellMeta: { value: cellMeta.texture },
+        uOwnership: { value: ownershipTexture },
         uCellMetaSize: { value: cellMeta.width },
         pulseCount: { value: 0 },
         pulseTimers: { value: new Array(MAX_PULSES).fill(0) },
@@ -481,7 +524,13 @@
       const entry = $cellMetadata[i];
       const anchor = cellLabelAnchors[i];
       const surface = labelPlacements[i]?.surface;
-      if (!entry.isExplored || entry.isVoid || entry.voidNeighborCount <= 0 || !anchor || !surface)
+      if (
+        !entry.isExplored ||
+        entry.isVoid ||
+        (!showZeroCounts && entry.voidNeighborCount <= 0) ||
+        !anchor ||
+        !surface
+      )
         continue;
       points.push(surface, new Vector3(anchor.x, anchor.y, anchor.z));
       const color = new Color(
@@ -499,7 +548,7 @@
   });
 
   const LABEL_COLORS = [
-    undefined,
+    "#0f172a",
     "#1d4ed8",
     "#15803d",
     "#b91c1c",
@@ -606,7 +655,7 @@
 </T.LineSegments>
 
 {#each $cellMetadata as entry, i (i)}
-  {#if entry.isExplored && !entry.isVoid && entry.voidNeighborCount > 0}
+  {#if entry.isExplored && !entry.isVoid && (showZeroCounts || entry.voidNeighborCount > 0)}
     {@const anchor = cellLabelAnchors[i]}
     {#if anchor}
       <IdleBillboard position={[anchor.x, anchor.y, anchor.z]}>

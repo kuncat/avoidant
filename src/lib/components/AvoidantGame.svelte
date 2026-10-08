@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import MapIcon from "./MapIcon.svelte";
+  import MultiplayerGame from "./MultiplayerGame.svelte";
+  import type { CompetitiveConfig, MultiplayerSetup } from "$lib/multiplayer/types";
   import { devicePixelRatio } from "svelte/reactivity/window";
   import { slide } from "svelte/transition";
   import { SvelteSet } from "svelte/reactivity";
@@ -19,7 +22,6 @@
   import { TutorialState } from "$lib/tutorial.svelte";
 
   const SETTINGS_STORAGE_KEY = "avoidant:gameSettings:v1";
-  const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
   const SIZE_PRESETS = { small: 80, medium: 160, large: 320 } as const;
 
   // Default mapshape parameters used when a preset is picked or no custom value has been entered yet.
@@ -45,34 +47,84 @@
   type SizePreset = keyof typeof SIZE_PRESETS | "custom";
   type Locale = (typeof locales)[number];
   type AvoidantGameProps = {
-    relayServers?: string[];
+    competitive?: CompetitiveConfig;
   };
 
-  let { relayServers = [] }: AvoidantGameProps = $props();
+  let { competitive }: AvoidantGameProps = $props();
+  let competitiveOpen = $state(false);
+  let account = $state<{ id: string; capabilities: string[] } | null>(null);
+  let authMessage = $state("");
+  let playMode = $state<"solo" | MultiplayerSetup["mode"]>("solo");
+  let multiplayerSetup = $state<MultiplayerSetup>();
+  let invitation = $state<string>();
+  let bordering = $state(true);
+  let turnBased = $state(false);
+  let infiniteFlood = $state(true);
+  let floodLimit = $state(3);
+  const playModes = [
+    { id: "solo", label: m.mode_solo, description: m.mode_solo_hint },
+    { id: "collaborative", label: m.mode_collaborative, description: m.mode_collaborative_hint },
+    { id: "duel", label: m.mode_duel, description: m.mode_duel_hint },
+    { id: "territory", label: m.mode_territory, description: m.mode_territory_hint },
+  ] as const;
+  $effect(() => {
+    const config = competitive;
+    if (!config) return;
+    let active = true;
+    void (async () => {
+      try {
+        const params = new URL(window.location.href).searchParams;
+        const pending =
+          params.get("match") ??
+          (params.has("state") ? sessionStorage.getItem("avoidant:competitiveMatch") : null);
+        if (pending) sessionStorage.setItem("avoidant:competitiveMatch", pending);
+        await config.account.completeLogin();
+        const current = await config.account.account();
+        if (!active) return;
+        account = current;
+        if (pending) {
+          invitation = pending;
+          ticketInput = pending;
+          if (current) competitiveOpen = true;
+          else setupMode = "join";
+        }
+      } catch (error) {
+        if (active) authMessage = String(error);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  });
+  async function login(register = false) {
+    try {
+      await competitive?.account.login(register);
+    } catch (error) {
+      authMessage = String(error);
+    }
+  }
+  async function logout() {
+    try {
+      await competitive?.account.logout();
+      account = null;
+      playMode = "solo";
+    } catch (error) {
+      authMessage = String(error);
+    }
+  }
+  function selectMode(mode: typeof playMode) {
+    playMode = mode;
+    if (mode !== "solo") {
+      if (sizePreset === "custom") sizePreset = "medium";
+      isTutorialMode = false;
+    }
+    infiniteFlood = mode === "collaborative";
+  }
 
   const localeLabels: Record<Locale, string> = {
     en: "English",
     bn: "বাংলা",
   };
-
-  function normalizeRelayServerList(input: string[]): string[] {
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity
-    const seen = new Set<string>();
-    const urls: string[] = [];
-    for (const item of input) {
-      const trimmed = item.trim();
-      if (!trimmed || seen.has(trimmed)) {
-        continue;
-      }
-      seen.add(trimmed);
-      urls.push(trimmed);
-    }
-    return urls;
-  }
-
-  function parseRelayServersInput(input: string): string[] {
-    return normalizeRelayServerList(input.split(/\r?\n/));
-  }
 
   let status: string | undefined = $state(undefined);
   let gameState = $state<GameState | undefined>(undefined);
@@ -91,7 +143,6 @@
   }
   // Shape selection state. The shape kind drives which numeric inputs are shown; each per-shape numeric value persists independently so switching back and forth doesn't reset the user's edits.
   let shapeKindInput = $state<ShapeKind>("icosahedron");
-  let playerNameInput = $state<string>(m.default_player_name());
   let settingsLoaded = $state(false);
   let isTutorialMode = $state(false);
   let tutorial = $state<TutorialState | undefined>(undefined);
@@ -100,18 +151,8 @@
   let setupMode: "host" | "join" | undefined = $state(undefined);
   let sizePreset = $state<SizePreset>("medium");
   let isAdvancedSettingsOpen = $state(false);
-  let relayServersInput = $state("");
-  let hasRelayServersConfigured = $derived(parseRelayServersInput(relayServersInput).length > 0);
   let ticketInput = $state("");
   let joinError: string | undefined = $state(undefined);
-  let inviteTicket = $state("");
-  let inviteUrl = $derived(
-    inviteTicket && typeof window !== "undefined"
-      ? `${window.location.origin}${window.location.pathname}?ticket=${encodeURIComponent(inviteTicket)}`
-      : "",
-  );
-  let isGeneratingInvite = $state(false);
-  let networkSnapshot = $derived(gameState?.networkSnapshot);
   let score = $derived(gameState?.score);
   let cellMetadataStore = $derived(gameState?.cellMetadata);
   let cellsStore = $derived(gameState?.cells);
@@ -122,9 +163,6 @@
   let isScoreBreakdownHovered = $state(false);
   let isScoreBreakdownPinned = $state(false);
   let showScoreBreakdown = $derived(isScoreBreakdownHovered || isScoreBreakdownPinned);
-  let connectedPeerCount = $derived(
-    ($networkSnapshot?.peers ?? []).filter((peer) => peer.isConnected).length,
-  );
   let cameraFov = $state(50);
 
   let selectedCellCount = $derived(
@@ -233,9 +271,7 @@
 
   onMount(() => {
     resetRandomSeed();
-    relayServersInput = normalizeRelayServerList(relayServers).join("\n");
     try {
-      playerNameInput = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ?? playerNameInput;
       const saved = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? "null");
       if (saved && typeof saved === "object" && !Array.isArray(saved)) {
         if (SHAPE_KINDS.includes(saved.shapeKind)) shapeKindInput = saved.shapeKind;
@@ -254,7 +290,6 @@
         randomSeed = saved.randomSeed !== false;
         if (!randomSeed && Number.isSafeInteger(saved.rngSeed) && saved.rngSeed >= 0)
           rngSeedInput = saved.rngSeed;
-        if (typeof saved.relayServers === "string") relayServersInput = saved.relayServers;
         if (typeof saved.tutorialMode === "boolean") isTutorialMode = saved.tutorialMode;
       }
     } catch {
@@ -267,14 +302,6 @@
         status = m.status_loading();
         await init();
         status = undefined;
-
-        const sharedTicket = new URLSearchParams(window.location.search).get("ticket");
-        if (sharedTicket) {
-          // Clear the ticket from the visible URL so a refresh doesn't re-trigger join.
-          window.history.replaceState({}, "", `${window.location.pathname}${window.location.hash}`);
-          ticketInput = sharedTicket;
-          setupMode = "join";
-        }
       } catch (error) {
         status = m.status_initialization_failed();
         console.error("Failed to initialize wasm", error);
@@ -305,11 +332,9 @@
         spikiness: spikinessInput,
         randomSeed,
         rngSeed: randomSeed ? undefined : rngSeedInput,
-        relayServers: relayServersInput,
         tutorialMode: isTutorialMode,
       };
       try {
-        localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerNameInput);
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
       } catch (error) {
         console.warn("Failed to persist game settings", error);
@@ -346,33 +371,24 @@
     }
   });
 
-  function hexCells(radius: number): string[] {
-    const cells: string[] = [];
-    const dx = radius * Math.sqrt(3);
-    const dy = radius * 1.5;
-    const size = 40;
-    for (let row = 0; ; row++) {
-      const cy = row * dy + radius;
-      if (cy - radius > size) break;
-      const xOffset = (row % 2) * (dx / 2);
-      for (let col = 0; ; col++) {
-        const cx = col * dx + xOffset + dx / 2;
-        if (cx - dx / 2 > size) break;
-        cells.push(
-          [
-            [cx, cy - radius],
-            [cx + dx / 2, cy - radius / 2],
-            [cx + dx / 2, cy + radius / 2],
-            [cx, cy + radius],
-            [cx - dx / 2, cy + radius / 2],
-            [cx - dx / 2, cy - radius / 2],
-          ]
-            .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
-            .join(" "),
-        );
+  function mosaicCells(divisions: number): string[] {
+    const point = (x: number, y: number) => [
+      (x * 40) / divisions + (x > 0 && x < divisions ? Math.sin(x * 3 + y * 7) * 2 : 0),
+      (y * 40) / divisions + (y > 0 && y < divisions ? Math.cos(x * 5 + y * 3) * 2 : 0),
+    ];
+    const polygons: string[] = [];
+    for (let y = 0; y < divisions; y++)
+      for (let x = 0; x < divisions; x++) {
+        const [a, b, c, d] = [point(x, y), point(x + 1, y), point(x + 1, y + 1), point(x, y + 1)];
+        for (const polygon of (x + y) % 3 === 0
+          ? [
+              [a, b, c],
+              [a, c, d],
+            ]
+          : [[a, b, c, d]])
+          polygons.push(polygon.map((p) => p.join(",")).join(" "));
       }
-    }
-    return cells;
+    return polygons;
   }
 
   type PresetIcon = {
@@ -384,21 +400,21 @@
   const presetIcons: PresetIcon[] = [
     {
       value: "small",
-      cells: hexCells(11),
+      cells: mosaicCells(2),
       get label() {
         return m.preset_small();
       },
     },
     {
       value: "medium",
-      cells: hexCells(7),
+      cells: mosaicCells(3),
       get label() {
         return m.preset_medium();
       },
     },
     {
       value: "large",
-      cells: hexCells(4.5),
+      cells: mosaicCells(5),
       get label() {
         return m.preset_large();
       },
@@ -414,15 +430,27 @@
 
   async function startGame() {
     if (status) return;
+    if (playMode !== "solo") {
+      if (!competitive || !account || sizePreset === "custom") return;
+      multiplayerSetup = {
+        mode: playMode,
+        map: shapeKindInput === "icosahedron" ? sizePreset : `${shapeKindInput}-${sizePreset}`,
+        bordering: playMode === "territory" && bordering,
+        turnBased: playMode === "duel" || (playMode === "territory" && turnBased),
+        floodLimit: infiniteFlood ? null : floodLimit,
+      };
+      invitation = undefined;
+      competitiveOpen = true;
+      setupMode = undefined;
+      return;
+    }
     let nextGameState: GameState | undefined;
     try {
-      const relayUrls = parseRelayServersInput($state.snapshot(relayServersInput));
       if (randomSeed) resetRandomSeed();
       const options: GameOptions = {
         elevationMax: 6.0,
         elevationMin: 0.0,
         numCells: selectedCellCount,
-        relayUrls: relayUrls.length > 0 ? relayUrls : undefined,
         rngSeed: $state.snapshot(rngSeedInput),
         shape: resolveShape(),
         spikiness: $state.snapshot(spikinessInput),
@@ -439,7 +467,6 @@
       terrain = generated.terrain;
       surfaceArea = generated.surfaceArea;
       boundsRadius = generated.boundsRadius;
-      inviteTicket = "";
       exploredCellsSeen = new SvelteSet<number>();
       pendingTutorialClick = undefined;
       tutorial = isTutorialMode ? new TutorialState() : undefined;
@@ -453,71 +480,22 @@
     }
   }
 
-  function extractTicket(input: string): string {
-    const trimmed = input.trim();
-    if (!trimmed) {
-      return "";
-    }
-    if (/^https?:\/\//i.test(trimmed)) {
-      try {
-        return new URL(trimmed).searchParams.get("ticket")?.trim() ?? "";
-      } catch {
-        return "";
-      }
-    }
-    return trimmed;
-  }
-
-  async function joinGame() {
+  function joinGame() {
     joinError = undefined;
-    let succeeded = false;
+    if (!account || !competitive) {
+      joinError = m.error_login_to_join();
+      return;
+    }
     try {
-      status = m.status_joining_game();
-      const ticket = extractTicket(ticketInput);
-      if (!ticket) {
-        throw new Error(m.error_join_ticket_required());
-      }
-      let options: GameOptions;
-      try {
-        options = GameState.optionsFromTicket(ticket);
-      } catch (error) {
-        console.error("Failed to parse ticket", error);
-        throw new Error(m.error_join_ticket_invalid(), { cause: error });
-      }
-      const nextGameState = new GameState(options);
-      status = m.status_generating_map();
-      const generated = await generateMap(options);
-      nextGameState.applyMapCells(generated.cells);
-      status = m.status_joining_game();
-      try {
-        await nextGameState.joinAsPeer(ticket, playerNameInput);
-      } catch (error) {
-        console.error("Failed to join peer", error);
-        try {
-          nextGameState.free();
-        } catch (freeError) {
-          console.error("Failed to release game state", freeError);
-        }
-        throw new Error(m.error_join_connect_failed(), { cause: error });
-      }
-      isFlatMap = options.shape?.kind === "flat";
-      gameState = nextGameState;
-      terrain = generated.terrain;
-      surfaceArea = generated.surfaceArea;
-      boundsRadius = generated.boundsRadius;
-      inviteTicket = "";
-      succeeded = true;
+      const input = ticketInput.trim();
+      const id = /^https?:\/\//i.test(input) ? new URL(input).searchParams.get("match") : input;
+      if (!id || !/^[a-f0-9-]{36}$/.test(id)) throw new Error(m.error_invitation_invalid());
+      invitation = id;
+      multiplayerSetup = undefined;
+      competitiveOpen = true;
+      setupMode = undefined;
     } catch (error) {
-      console.error("Failed to join game", error);
-      joinError = error instanceof Error ? error.message : m.error_join_failed();
-    } finally {
-      status = undefined;
-      if (succeeded) {
-        setupMode = undefined;
-        ticketInput = "";
-      } else {
-        setupMode = "join";
-      }
+      joinError = String(error);
     }
   }
 
@@ -532,7 +510,6 @@
     surfaceArea = 0;
     boundsRadius = DEFAULT_RADIUS;
     setupMode = undefined;
-    inviteTicket = "";
     ticketInput = "";
     joinError = undefined;
     status = undefined;
@@ -540,38 +517,25 @@
     exploredCellsSeen = new SvelteSet<number>();
     pendingTutorialClick = undefined;
   }
-
-  async function copyInviteTicket() {
-    if (!inviteUrl) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-    } catch (error) {
-      console.error("Failed to copy invitation URL", error);
-    }
-  }
-
-  async function generateInvite() {
-    if (isGeneratingInvite) {
-      return;
-    }
-    isGeneratingInvite = true;
-    try {
-      inviteTicket = (await gameState?.invite(playerNameInput)) ?? "";
-      if (inviteTicket) {
-        await copyInviteTicket();
-      }
-    } catch (error) {
-      console.error("Failed to create invitation", error);
-    } finally {
-      isGeneratingInvite = false;
-    }
-  }
 </script>
 
+{#if competitiveOpen && competitive}
+  <MultiplayerGame
+    config={competitive}
+    setup={multiplayerSetup}
+    {invitation}
+    onexit={() => {
+      competitiveOpen = false;
+      multiplayerSetup = undefined;
+      invitation = undefined;
+    }}
+  />
+{/if}
+
 <div
-  class="panel-wrapper fixed inset-x-0 z-20 flex justify-center select-none"
+  data-theme="winter"
+  class="panel-wrapper fixed inset-x-0 z-20 flex justify-center bg-transparent select-none"
+  style:display={competitiveOpen && competitive ? "none" : undefined}
   class:[&_*]:text-white={gameState}
   class:panel-wrapper-card={!gameState}
   class:panel-wrapper-header={gameState}
@@ -581,7 +545,7 @@
   <div
     class="panel-shell w-full"
     class:max-w-full={gameState}
-    class:max-w-md={!gameState && setupMode}
+    class:max-w-xl={!gameState && setupMode}
     class:max-w-xs={!gameState && !setupMode}
     class:panel-card={!gameState}
     class:panel-header={gameState}
@@ -666,34 +630,29 @@
             {/if}
           </div>
         {/if}
-        <div class="ml-auto text-sm text-slate-200!">
-          {#if connectedPeerCount > 0}
-            {m.label_players({ count: connectedPeerCount + 1 })}:
-            <strong>{connectedPeerCount + 1}</strong>
-          {/if}
-        </div>
-        <div class="flex gap-2">
-          {#if !isTutorialMode && hasRelayServersConfigured}
-            <button
-              class="btn btn-primary"
-              type="button"
-              onclick={generateInvite}
-              disabled={isGeneratingInvite || ($score?.safeExplored ?? 0) === 0}
-              title={($score?.safeExplored ?? 0) === 0 ? m.text_invite_after_opening() : undefined}
-            >
-              {#if isGeneratingInvite}
-                <span class="spinner" aria-hidden="true"></span>
-                <span>{m.status_preparing()}</span>
-              {:else}
-                {m.action_invite()}
-              {/if}
-            </button>
-          {/if}
-          <button class="btn btn-danger" type="button" onclick={exitGame}>{m.action_exit()}</button>
+        <div class="ml-auto flex gap-2">
+          <button class="btn btn-error" type="button" onclick={exitGame}>{m.action_exit()}</button>
         </div>
       {/if}
     </div>
 
+    {#if !gameState}
+      <div class="my-3 flex flex-wrap justify-center gap-2">
+        {#if account}<button class="btn btn-secondary btn-sm" onclick={logout}
+            >{m.action_logout()}</button
+          >
+        {:else}<button
+            class="btn btn-secondary btn-sm"
+            disabled={!competitive}
+            onclick={() => login()}>{m.action_login()}</button
+          ><button
+            class="btn btn-secondary btn-sm"
+            disabled={!competitive}
+            onclick={() => login(true)}>{m.action_register()}</button
+          >{/if}
+      </div>
+      {#if authMessage}<p role="status" class="text-sm">{authMessage}</p>{/if}
+    {/if}
     {#if status}
       <p class="mt-2 text-sm text-slate-600!">{status}</p>
     {/if}
@@ -710,189 +669,343 @@
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
             <div class="mb-4 w-full px-3">
-              <label class="field-label" for="player-name">{m.field_player_name()}</label>
-              <input class="field" id="player-name" type="text" bind:value={playerNameInput} />
-            </div>
-            <div class="mb-4 w-full px-3">
-              <label class="field-label" for="shape-select">{m.field_map_shape()}</label>
-              <select id="shape-select" class="field" bind:value={shapeKindInput}>
-                {#each SHAPE_KINDS as kind (kind)}
-                  <option value={kind}>{m.shape_label({ kind })}</option>
-                {/each}
-              </select>
-            </div>
-            <div class="mb-4 w-full px-3">
-              <span class="field-label">{m.field_map_size()}</span>
-              <div class="grid grid-cols-4 gap-2">
-                {#each presetIcons as preset (preset.value)}
+              <span class="field-label">{m.field_play_mode()}</span>
+              <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {#each playModes as mode (mode.id)}
                   <button
                     type="button"
-                    class="preset-btn"
-                    class:preset-btn-active={sizePreset === preset.value}
-                    aria-pressed={sizePreset === preset.value}
-                    onclick={() => (sizePreset = preset.value)}
+                    class="btn h-auto min-h-28 flex-col gap-1 py-3 font-normal disabled:bg-base-200 disabled:text-base-content/60 disabled:opacity-100"
+                    class:btn-primary={playMode === mode.id}
+                    aria-pressed={playMode === mode.id}
+                    disabled={mode.id !== "solo" && (!account || !competitive)}
+                    onclick={() => selectMode(mode.id)}
                   >
-                    <span class="preset-icon">
-                      {#if preset.cells}
-                        <svg
-                          viewBox="0 0 40 40"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1"
-                          stroke-linejoin="round"
-                          aria-hidden="true"
-                        >
-                          {#each preset.cells as points, i (i)}
-                            <polygon {points} />
-                          {/each}
-                        </svg>
-                      {:else}
-                        <svg
-                          viewBox="0 0 40 40"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2.5"
-                          stroke-linecap="round"
-                          aria-hidden="true"
-                        >
-                          <line x1="8" y1="12" x2="32" y2="12" />
-                          <circle cx="15" cy="12" r="3.5" fill="currentColor" />
-                          <line x1="8" y1="20" x2="32" y2="20" />
-                          <circle cx="25" cy="20" r="3.5" fill="currentColor" />
-                          <line x1="8" y1="28" x2="32" y2="28" />
-                          <circle cx="19" cy="28" r="3.5" fill="currentColor" />
-                        </svg>
-                      {/if}
-                    </span>
-                    <span class="preset-label">{preset.label}</span>
-                    <span class="preset-count">
-                      {preset.value === "custom"
-                        ? ""
-                        : m.cells_count({ count: SIZE_PRESETS[preset.value] })}
-                    </span>
+                    <span class="preset-icon"
+                      ><svg
+                        viewBox="0 0 40 40"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        aria-hidden="true"
+                      >
+                        {#if mode.id === "solo"}<circle cx="20" cy="10" r="5" /><path
+                            d="M9 34v-8a11 11 0 0 1 22 0v8M15 25l5 5 5-5"
+                          />
+                        {:else if mode.id === "collaborative"}<circle
+                            cx="12"
+                            cy="10"
+                            r="4"
+                          /><circle cx="28" cy="10" r="4" /><path
+                            d="M5 26v-5a7 7 0 0 1 14 0v5M21 26v-5a7 7 0 0 1 14 0v5M12 29h16M20 24v10"
+                          />
+                        {:else if mode.id === "duel"}<path
+                            d="M8 6l25 25M32 6L7 31M5 25l10 10M25 35l10-10M8 6l1 9 6-6M32 6l-1 9-6-6"
+                          />
+                        {:else}<path
+                            d="M4 5h15v13H4zM21 5h15v13H21zM4 20h15v15H4zM21 20h15v15H21zM7 14l9-6M24 31l9-7"
+                          />{/if}
+                      </svg></span
+                    >
+                    <span class="preset-label">{mode.label()}</span><span class="text-xs"
+                      >{mode.description()}</span
+                    >
+                  </button>
+                {/each}
+              </div>
+              {#if !account}<p class="field-help mt-2">
+                  {m.text_multiplayer_login()}
+                </p>{/if}
+            </div>
+
+            <fieldset
+              class="mx-3 mb-6 fieldset min-w-0 flex-1 rounded-lg border border-secondary px-4 pb-4"
+              transition:slide={{ duration: 180 }}
+            >
+              <legend class="fieldset-legend">{m.label_gameplay_options()}</legend>
+              {#if playMode === "solo"}
+                <div class="flex flex-col items-start gap-2" transition:slide={{ duration: 180 }}>
+                  <label
+                    class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                    for="tutorial-mode"
+                  >
+                    <span>{m.field_tutorial_mode()}</span>
+                    <input
+                      id="tutorial-mode"
+                      type="checkbox"
+                      class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                      bind:checked={isTutorialMode}
+                      disabled={sizePreset === "custom"}
+                    />
+                  </label>
+                </div>
+              {/if}
+              {#if playMode !== "solo"}
+                {#if playMode === "territory"}
+                  <div class="flex flex-col items-start gap-2" transition:slide={{ duration: 180 }}>
+                    <div
+                      class="form-control flex w-full flex-row items-center justify-between gap-4"
+                    >
+                      <label
+                        class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                        ><span>{m.field_bordering()}</span><input
+                          type="checkbox"
+                          class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                          bind:checked={bordering}
+                        /></label
+                      >
+                    </div>
+                    <div
+                      class="form-control flex w-full flex-row items-center justify-between gap-4"
+                    >
+                      <label
+                        class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                        ><span>{m.field_turn_based()}</span><input
+                          type="checkbox"
+                          class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                          bind:checked={turnBased}
+                        /></label
+                      >
+                    </div>
+                  </div>
+                {/if}
+                <div class="form-control flex w-full flex-row items-center justify-between gap-4">
+                  <label
+                    class="label text-left whitespace-normal text-base-content"
+                    for="flood-limit">{m.field_flood_limit()}</label
+                  >
+                  <div class="join w-28 shrink-0" role="group" aria-label={m.field_flood_limit()}>
+                    <input
+                      id="flood-limit"
+                      class="input join-item min-w-0 flex-1 input-sm focus:outline-none"
+                      aria-label={m.field_flood_cells()}
+                      type="number"
+                      min="1"
+                      max="4096"
+                      step="1"
+                      required
+                      class:input-ghost={infiniteFlood}
+                      class:border-base-300={infiniteFlood}
+                      class:border-2={!infiniteFlood}
+                      class:input-primary={!infiniteFlood}
+                      bind:value={floodLimit}
+                      onclick={() => (infiniteFlood = false)}
+                    />
+                    <button
+                      type="button"
+                      class="btn join-item btn-sm"
+                      class:btn-primary={infiniteFlood}
+                      class:btn-outline={!infiniteFlood}
+                      class:border-base-300={!infiniteFlood}
+                      aria-label={m.field_infinite_flood()}
+                      aria-pressed={infiniteFlood}
+                      onclick={() => (infiniteFlood = true)}
+                      ><span aria-hidden="true" class="text-xl">∞</span></button
+                    >
+                  </div>
+                </div>
+              {/if}
+            </fieldset>
+            <div class="mb-4 w-full px-3" role="group" aria-labelledby="map-label">
+              <span id="map-label" class="field-label">{m.field_map()}</span>
+              <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {#each SHAPE_KINDS as kind (kind)}
+                  <button
+                    type="button"
+                    class="btn h-auto min-h-28 min-w-0 flex-col gap-2 px-2 py-3 font-normal"
+                    class:btn-primary={shapeKindInput === kind}
+                    aria-pressed={shapeKindInput === kind}
+                    onclick={() => (shapeKindInput = kind)}
+                  >
+                    <span class="preset-icon"><MapIcon {kind} /></span>
+                    <span class="text-xs whitespace-normal">{m.shape_label({ kind })}</span>
                   </button>
                 {/each}
               </div>
             </div>
-            {#if sizePreset === "custom"}
-              <div class="mb-4 w-full px-3">
-                <label class="field-label" for="size-input">{m.field_size()}</label>
-
-                <input
-                  class="field"
-                  id="size-input"
-                  type="number"
-                  required
-                  min="32"
-                  max="5000"
-                  step="1"
-                  bind:value={numCellsInput}
-                />
+            <fieldset
+              class="mx-3 mb-6 fieldset w-full min-w-0 rounded-lg border border-secondary px-3"
+              transition:slide={{ duration: 180 }}
+            >
+              <legend class="fieldset-legend">{m.label_map_options()}</legend>
+              <div class="w-full">
+                <span class="field-label">{m.field_map_size()}</span>
+                <div class="grid grid-cols-4 gap-2">
+                  {#each presetIcons as preset (preset.value)}
+                    <button
+                      type="button"
+                      class="btn h-auto min-h-24 flex-col gap-1 py-3 font-normal"
+                      class:btn-primary={sizePreset === preset.value}
+                      disabled={playMode !== "solo" && preset.value === "custom"}
+                      aria-pressed={sizePreset === preset.value}
+                      onclick={() => (sizePreset = preset.value)}
+                    >
+                      <span class="preset-icon">
+                        {#if preset.cells}
+                          <svg
+                            viewBox="0 0 40 40"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                          >
+                            {#each preset.cells as points, i (i)}
+                              <polygon {points} />
+                            {/each}
+                          </svg>
+                        {:else}
+                          <svg
+                            viewBox="0 0 40 40"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                          >
+                            <line x1="8" y1="10" x2="32" y2="10" />
+                            <circle cx="15" cy="10" r="1.5" fill="currentColor" />
+                            <line x1="8" y1="20" x2="32" y2="20" />
+                            <circle cx="25" cy="20" r="1.5" fill="currentColor" />
+                            <line x1="8" y1="30" x2="32" y2="30" />
+                            <circle cx="19" cy="30" r="1.5" fill="currentColor" />
+                          </svg>
+                        {/if}
+                      </span>
+                      <span class="preset-label">{preset.label}</span>
+                      <span class="preset-count">
+                        {preset.value === "custom"
+                          ? ""
+                          : m.cells_count({ count: SIZE_PRESETS[preset.value] })}
+                      </span>
+                    </button>
+                  {/each}
+                </div>
               </div>
-            {/if}
-            <p class="field-help mb-4 w-full px-3">
-              {usesFaceDensity
-                ? m.text_density_summary({ faces: faceCount, count: selectedCellCount })
-                : m.cells_count({ count: selectedCellCount })}
-            </p>
-            <div class="mb-4 w-full px-3">
-              <div class="advanced-settings" class:advanced-settings-open={isAdvancedSettingsOpen}>
-                <button
-                  type="button"
-                  class="advanced-settings-summary w-full"
-                  aria-expanded={isAdvancedSettingsOpen}
-                  aria-controls="advanced-settings-content"
-                  onclick={() => (isAdvancedSettingsOpen = !isAdvancedSettingsOpen)}
+              {#if sizePreset === "custom"}
+                <fieldset
+                  class="fieldset w-full min-w-0 rounded-lg border border-secondary px-3 pb-4"
+                  transition:slide={{ duration: 180 }}
                 >
-                  {m.label_advanced_settings()}
-                </button>
-                {#if isAdvancedSettingsOpen}
-                  <div
-                    id="advanced-settings-content"
-                    class="advanced-settings-content"
-                    transition:slide={{ duration: 180 }}
+                  <legend class="fieldset-legend">{m.label_custom_map_options()}</legend>
+                  <div class="form-control flex w-full flex-row items-center justify-between gap-4">
+                    <label
+                      class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                      for="size-input"
+                      >{m.field_size()}
+                      <input
+                        class="input w-32 input-sm"
+                        id="size-input"
+                        type="number"
+                        required
+                        min="32"
+                        max="5000"
+                        step="1"
+                        bind:value={numCellsInput}
+                      />
+                    </label>
+                  </div>
+                </fieldset>
+              {/if}
+              <div class="field-help my-4 w-full px-3">
+                {usesFaceDensity
+                  ? m.text_density_summary({ faces: faceCount, count: selectedCellCount })
+                  : m.cells_count({ count: selectedCellCount })}
+              </div>
+            </fieldset>
+            {#if playMode === "solo"}
+              <fieldset class="mb-4 fieldset w-full px-3" transition:slide={{ duration: 180 }}>
+                <div
+                  class="advanced-settings"
+                  class:advanced-settings-open={isAdvancedSettingsOpen}
+                >
+                  <button
+                    type="button"
+                    class="advanced-settings-summary w-full"
+                    aria-expanded={isAdvancedSettingsOpen}
+                    aria-controls="advanced-settings-content"
+                    onclick={() => (isAdvancedSettingsOpen = !isAdvancedSettingsOpen)}
                   >
-                    <label class="field-label" for="void-fraction-input"
-                      >{m.field_void_fraction()}</label
+                    {m.label_advanced_settings()}
+                  </button>
+                  {#if isAdvancedSettingsOpen}
+                    <div
+                      id="advanced-settings-content"
+                      class="advanced-settings-content"
+                      transition:slide={{ duration: 180 }}
                     >
-                    <input
-                      class="field mb-3"
-                      id="void-fraction-input"
-                      type="number"
-                      required
-                      min="0"
-                      max="0.999"
-                      step="0.00001"
-                      bind:value={voidFractionInput}
-                    />
-                    <label class="field-label" for="spikiness-input">{m.field_spikiness()}</label>
-                    <input
-                      class="field mb-3"
-                      id="spikiness-input"
-                      type="number"
-                      required
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      bind:value={spikinessInput}
-                    />
-                    <label class="field-label" for="relay-servers"
-                      ><a
-                        href="https://docs.iroh.computer/deployment/dedicated-infrastructure"
-                        target="_blank"
-                        rel="noopener noreferrer">{m.field_relay_servers()}</a
-                      ></label
-                    >
-                    <textarea
-                      class="field field-textarea mb-1"
-                      id="relay-servers"
-                      bind:value={relayServersInput}
-                      rows="4"
-                      spellcheck="false"></textarea>
-                    <p class="field-help">{m.text_relay_servers_hint()}</p>
-                    <div class="mt-6 w-full">
-                      <label class="field-label" for="rng-seed-input">{m.field_seed()}</label>
-                      <div class="mb-3 flex">
-                        <input
-                          class="field mb-0! min-w-0 rounded-r-none! disabled:opacity-60"
-                          id="rng-seed-input"
-                          type="number"
-                          inputmode="numeric"
-                          bind:value={rngSeedInput}
-                          disabled={randomSeed}
-                          min="0"
-                          max={Number.MAX_SAFE_INTEGER}
-                          step="1"
-                          required
-                        />
-                        <button
-                          type="button"
-                          class="btn shrink-0 rounded-l-none! text-xl"
-                          class:btn-primary={randomSeed}
-                          class:btn-secondary={!randomSeed}
-                          title={m.action_random()}
-                          aria-label={m.action_random()}
-                          aria-pressed={randomSeed}
-                          onclick={() => {
-                            randomSeed = !randomSeed;
-                            if (randomSeed) resetRandomSeed();
-                          }}><span aria-hidden="true">⚄</span></button
+                      <div
+                        class="form-control flex w-full flex-row items-center justify-between gap-4"
+                      >
+                        <label
+                          class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                          ><span>{m.field_void_fraction()}</span><input
+                            class="input w-24 input-sm"
+                            max="0.999"
+                            min="0"
+                            required
+                            step="0.00001"
+                            type="number"
+                            bind:value={voidFractionInput}
+                          /></label
                         >
                       </div>
+                      <div
+                        class="form-control flex w-full flex-row items-center justify-between gap-4"
+                      >
+                        <label
+                          class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                          ><span>{m.field_spikiness()}</span><input
+                            class="input w-16 input-sm"
+                            max="1"
+                            min="0"
+                            required
+                            step="0.05"
+                            type="number"
+                            bind:value={spikinessInput}
+                          /></label
+                        >
+                      </div>
+                      <div
+                        class="form-control flex w-full flex-row items-center justify-between gap-4"
+                      >
+                        <label
+                          class="label text-left whitespace-normal text-base-content"
+                          for="rng-seed-input">{m.field_seed()}</label
+                        >
+                        <div class="join w-48 shrink-0" role="group" aria-label={m.field_seed()}>
+                          <input
+                            id="rng-seed-input"
+                            class="input join-item min-w-0 flex-1 input-sm focus:outline-none"
+                            type="number"
+                            min="0"
+                            max={Number.MAX_SAFE_INTEGER}
+                            step="1"
+                            required
+                            class:input-ghost={randomSeed}
+                            class:border-base-300={randomSeed}
+                            class:border-2={!randomSeed}
+                            class:input-primary={!randomSeed}
+                            bind:value={rngSeedInput}
+                            onclick={() => (randomSeed = false)}
+                          />
+                          <button
+                            aria-label={m.action_random()}
+                            aria-pressed={randomSeed}
+                            class="btn join-item btn-sm"
+                            class:border-base-300={!randomSeed}
+                            class:btn-outline={!randomSeed}
+                            class:btn-primary={randomSeed}
+                            onclick={() => (randomSeed = true)}
+                            title={m.action_random()}
+                            type="button"><span aria-hidden="true" class="text-xl">⚄</span></button
+                          >
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                {/if}
-              </div>
-            </div>
-            <div class="checkbox-field mb-4 flex w-full items-center gap-2 px-3">
-              <label class="field-label mb-0!" for="tutorial-mode">{m.field_tutorial_mode()}</label>
-              <input
-                id="tutorial-mode"
-                type="checkbox"
-                bind:checked={isTutorialMode}
-                disabled={sizePreset === "custom"}
-              />
-            </div>
+                  {/if}
+                </div>
+              </fieldset>
+            {/if}
           </div>
           <div class="flex flex-wrap justify-center gap-2">
             <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
@@ -912,15 +1025,11 @@
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
             <div class="mb-6 w-full px-3 md:mb-0">
-              <label class="field-label" for="join-player-name">{m.field_player_name()}</label>
-              <input class="field" id="join-player-name" type="text" bind:value={playerNameInput} />
-            </div>
-            <div class="mb-6 w-full px-3 md:mb-0">
               <label class="field-label" for="ticket-input"
                 >{m.field_ticket_or_invitation_url()}</label
               >
               <input
-                class="field"
+                class="input mb-3 w-full input-sm"
                 id="ticket-input"
                 type="text"
                 bind:value={ticketInput}
@@ -944,7 +1053,9 @@
             >
               {m.action_back()}
             </button>
-            <button class="btn btn-primary" type="submit">{m.action_join()}</button>
+            <button class="btn btn-primary" type="submit" disabled={!account || !competitive}
+              >{m.action_join()}</button
+            >
           </div>
         </form>
       {:else}
@@ -952,17 +1063,22 @@
           <button class="btn btn-primary" type="button" onclick={() => (setupMode = "host")}>
             {m.action_new_game()}
           </button>
-          <button class="btn btn-primary" type="button" onclick={() => (setupMode = "join")}>
+          <button
+            class="btn btn-primary"
+            type="button"
+            disabled={!account || !competitive}
+            onclick={() => (setupMode = "join")}
+          >
             {m.action_join_game()}
           </button>
         </div>
         <div class="mt-4 flex justify-center" transition:slide={{ duration: 180 }}>
-          <label class="sr-only" for="language-select">Language</label>
+          <label class="sr-only" for="language-select">{m.field_language()}</label>
           <select
             id="language-select"
-            class="locale-select min-w-1/2"
+            class="select w-40 select-sm"
             value={getLocale()}
-            aria-label="Language"
+            aria-label={m.field_language()}
             onchange={(event) => {
               setLocale((event.currentTarget as HTMLSelectElement).value as Locale);
             }}
@@ -975,32 +1091,6 @@
           </select>
         </div>
       {/if}
-    {:else if inviteTicket}
-      <div class="mt-3" transition:slide={{ duration: 200 }}>
-        <div class="mb-2 flex items-center justify-between gap-2">
-          <label class="field-label mb-0" for="invite-ticket">{m.field_invitation_url()}</label>
-          <button
-            class="icon-btn"
-            type="button"
-            aria-label={m.aria_close_invitation()}
-            onclick={() => (inviteTicket = "")}
-          >
-            ×
-          </button>
-        </div>
-        <div class="flex items-stretch gap-2">
-          <input
-            id="invite-ticket"
-            class="field mb-0 flex-1"
-            type="text"
-            readonly
-            value={inviteUrl}
-          />
-          <button class="btn btn-secondary" type="button" onclick={copyInviteTicket}>
-            {m.action_copy()}
-          </button>
-        </div>
-      </div>
     {/if}
   </div>
 </div>
@@ -1024,7 +1114,7 @@
       />
       <Board
         flat={isFlatMap}
-        bind:gameState
+        {gameState}
         {terrain}
         {surfaceArea}
         interactive={tutorial?.isExplorationAllowed ?? true}

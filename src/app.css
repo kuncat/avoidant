@@ -1,4 +1,8 @@
 /* Dev-only Tailwind entry for the library's SvelteKit preview. Not shipped. */
 @import "tailwindcss";
-@plugin "@tailwindcss/forms";
+@plugin "daisyui" {
+  themes:
+    winter --default,
+    night;
+}
 @plugin "@tailwindcss/typography";

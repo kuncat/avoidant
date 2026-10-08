@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/game", "crates/networking"]
+members = ["crates/game", "crates/networking", "crates/competitive"]
 default-members = ["crates/game"]
 
 [workspace.dependencies]

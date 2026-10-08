@@ -1,0 +1,20 @@
+{
+  "name": "@kuncat/avoidant-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "tsc --noEmit",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "build:rules": "wasm-pack build ../crates/competitive --target web --out-dir ../../server/rules -- --locked",
+    "test": "node --test tests/*.test.mjs",
+    "test:ui": "node tests/ui-smoke.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261007.1",
+    "wrangler": "^4.0.0",
+    "typescript": "^6.0.0",
+    "miniflare": "^4.0.0"
+  }
+}

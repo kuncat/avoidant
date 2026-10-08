@@ -1,0 +1,275 @@
+{
+  "cube-large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "cube",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "cube-medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "cube",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "cube-small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "cube",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "dodecahedron-large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "dodecahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "dodecahedron-medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "dodecahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "dodecahedron-small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "dodecahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "flat-large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "flat",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "flat-medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "flat",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "flat-small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "flat",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "geodesicIcosphere-large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "geodesicIcosphere",
+      "radius": 50,
+      "subdivisions": 1
+    },
+    "spikiness": 0.8
+  },
+  "geodesicIcosphere-medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "geodesicIcosphere",
+      "radius": 50,
+      "subdivisions": 1
+    },
+    "spikiness": 0.8
+  },
+  "geodesicIcosphere-small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "geodesicIcosphere",
+      "radius": 50,
+      "subdivisions": 1
+    },
+    "spikiness": 0.8
+  },
+  "large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "icosahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "icosahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "octahedron-large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "octahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "octahedron-medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "octahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "octahedron-small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "octahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "icosahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "spheroid-large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "spheroid",
+      "radiusX": 50,
+      "radiusY": 40,
+      "radiusZ": 50
+    },
+    "spikiness": 0.8
+  },
+  "spheroid-medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "spheroid",
+      "radiusX": 50,
+      "radiusY": 40,
+      "radiusZ": 50
+    },
+    "spikiness": 0.8
+  },
+  "spheroid-small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "spheroid",
+      "radiusX": 50,
+      "radiusY": 40,
+      "radiusZ": 50
+    },
+    "spikiness": 0.8
+  },
+  "tetrahedron-large": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 320,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "tetrahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "tetrahedron-medium": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 160,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "tetrahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  },
+  "tetrahedron-small": {
+    "elevationMax": 6,
+    "elevationMin": 0,
+    "numCells": 80,
+    "rngSeed": 42,
+    "shape": {
+      "kind": "tetrahedron",
+      "radius": 50
+    },
+    "spikiness": 0.8
+  }
+}

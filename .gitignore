@@ -30,7 +30,11 @@ project.inlang/cache/
 
 /target
 **/*.rs.bk
-Cargo.lock
 bin/
 wasm-pkg
 wasm-pack.log
+
+# Competitive server generated artifacts
+/server/rules/
+/server/dist/
+/server/.wrangler/

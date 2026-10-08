@@ -61,28 +61,39 @@ You can preview the production build with `npm run preview`.
 cd crates/game && wasm-pack test --headless --firefox
 ```
 
-## Multiplayer synchronization
+## Multiplayer
 
-The player who creates the game is its authority and must remain online. Invitations
-become available after the safe opening move. Invitees rebuild the same map and void
-layout, then wait for the host's complete explored-cell and score snapshot before
-playing. Create fresh invitations after updating from older protocol versions.
+The existing New Game menu offers Solo, Collaborative, Duel and Territory. All
+three multiplayer modes require a Kuncat account and use the trusted Rust authority.
+Collaborative games share reveals and a team score; duel and territory use their
+respective competitive rules. Invitations join through the same menu and login flow.
+Solo stays local and does not require an account. Legacy peer synchronization code
+remains in the Rust library, but its relay settings and host/join paths are no longer
+exposed by the application.
 
-Moves carry request IDs. The host applies each request once and publishes a numbered
-snapshot; peers ignore older snapshots. Requests and snapshots are retried every
-three seconds, including after a reconnect. Reveal animations only update display
-flags; they cannot change the canonical board, score, streak, or completion state.
-Host migration and playing offline as a guest are not supported.
+See [the implementation plan](docs/multiplayer-plan.md) for rules, identity and
+architecture diagrams, and [the server guide](server/README.md) for deployment.
+The component's optional `competitive` configuration supplies the server URL and
+Kuncat account client for all three multiplayer modes. Without configuration,
+multiplayer controls remain disabled. The sibling website configures shared OIDC;
+the sibling infra repository provisions identity, database and Workers.
 
-Native synchronization regression tests:
+```sh
+npm ci
+npm --prefix server ci
+npm run dev:multiplayer -- --host
+```
+
+The local launcher supplies test accounts to the ordinary menu. Production builds
+exclude that adapter. Open the printed player URLs, choose New Game and a mode,
+then share the invitation link. No cloud provisioning is needed for local play.
 
 ```sh
 cargo test -p avoidant --lib
+cargo test -p avoidant-competitive
+npm --prefix server test
 ```
 
-WASM integration test (Node.js, with the matching wasm-bindgen-test-runner on PATH):
-
-```sh
-NODE_PATH="$PWD/node_modules" CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
-  cargo test -p avoidant --lib --target wasm32-unknown-unknown
-```
+The shared menu uses DaisyUI 5 with Tailwind 4. Consumers of the Svelte package
+must install `daisyui` and enable its Tailwind plugin (themes `winter` and `night`),
+as configured in `src/app.css` and the sibling games site's stylesheet.
