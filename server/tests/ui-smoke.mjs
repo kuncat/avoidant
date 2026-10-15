@@ -46,7 +46,6 @@ try {
   const mode = process.env.TEST_MODE ?? "territory";
   const modeLabels = {
     collaborative: "Collaborative Explore together",
-    duel: "Duel Take turns to score",
     territory: "Territory Claim the board",
   };
   await a.getByRole("button", { name: modeLabels[mode], exact: true }).click();
@@ -104,7 +103,7 @@ try {
     await a
       .getByLabel("Additional flood cells", { exact: true })
       .evaluate((el) => el.checkValidity()),
-    false,
+    true,
   );
   await a.getByLabel("Additional flood cells", { exact: true }).fill("3");
   assert.ok(

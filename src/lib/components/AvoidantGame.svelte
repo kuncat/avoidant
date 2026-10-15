@@ -78,7 +78,6 @@
   const playModes = [
     { id: "solo", label: m.mode_solo, description: m.mode_solo_hint },
     { id: "collaborative", label: m.mode_collaborative, description: m.mode_collaborative_hint },
-    { id: "duel", label: m.mode_duel, description: m.mode_duel_hint },
     { id: "territory", label: m.mode_territory, description: m.mode_territory_hint },
   ] as const;
   $effect(() => {
@@ -439,7 +438,7 @@
         mode: playMode,
         map: shapeKindInput === "icosahedron" ? sizePreset : `${shapeKindInput}-${sizePreset}`,
         bordering: playMode === "territory" && bordering,
-        turnBased: playMode === "duel" || (playMode === "territory" && turnBased),
+        turnBased: playMode === "territory" && turnBased,
         floodLimit: infiniteFlood ? null : floodLimit,
         matchMinutes: matchDuration * (matchUnit === "hours" ? 60 : 1),
         turnSeconds: turnTimer ? turnSeconds : null,
@@ -659,7 +658,7 @@
               <span class="field-label"
                 ><OptionHelp label={m.field_play_mode()} help={m.help_play_mode()} /></span
               >
-              <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div class="grid grid-cols-3 gap-2">
                 {#each playModes as mode (mode.id)}
                   <button
                     type="button"
@@ -686,9 +685,6 @@
                             r="4"
                           /><circle cx="28" cy="10" r="4" /><path
                             d="M5 26v-5a7 7 0 0 1 14 0v5M21 26v-5a7 7 0 0 1 14 0v5M12 29h16M20 24v10"
-                          />
-                        {:else if mode.id === "duel"}<path
-                            d="M8 6l25 25M32 6L7 31M5 25l10 10M25 35l10-10M8 6l1 9 6-6M32 6l-1 9-6-6"
                           />
                         {:else}<path
                             d="M4 5h15v13H4zM21 5h15v13H21zM4 20h15v15H4zM21 20h15v15H21zM7 14l9-6M24 31l9-7"
@@ -834,7 +830,7 @@
                     </div>
                   </div>
                 {/if}
-                {#if playMode === "duel" || (playMode === "territory" && turnBased)}
+                {#if playMode === "territory" && turnBased}
                   <div class="grid gap-2" transition:slide={{ duration: 180 }}>
                     <label
                       class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"

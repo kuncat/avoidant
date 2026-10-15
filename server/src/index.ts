@@ -127,7 +127,7 @@ export default {
               input.turnSeconds < 1 ||
               input.turnSeconds > 86400)) ||
           !Object.hasOwn(catalog, input.map) ||
-          !["collaborative", "duel", "territory"].includes(input.mode) ||
+          !["collaborative", "territory"].includes(input.mode) ||
           typeof input.bordering !== "boolean" ||
           typeof input.turnBased !== "boolean" ||
           !(
@@ -244,7 +244,7 @@ export class MatchRoom extends DurableObject<Env> {
         if (this.saved) return json({ error: "Already created" }, 409);
         const input = (await request.json()) as {
           map: keyof typeof catalog;
-          mode: "duel" | "territory";
+          mode: "collaborative" | "territory";
           bordering: boolean;
           turnBased: boolean;
           floodLimit: number | null;

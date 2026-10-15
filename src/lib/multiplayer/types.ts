@@ -31,7 +31,7 @@ export interface MatchSnapshot {
   turnDeadline: number;
   deadline: number;
   options: {
-    mode: "collaborative" | "duel" | "territory";
+    mode: "collaborative" | "territory";
     bordering: boolean;
     floodLimit: number | null;
     turnBased: boolean;
@@ -60,7 +60,7 @@ export const PLAYER_COLORS = [
 ];
 
 export interface MultiplayerSetup {
-  mode: "collaborative" | "duel" | "territory";
+  mode: "collaborative" | "territory";
   map: string;
   bordering: boolean;
   turnBased: boolean;

@@ -4,7 +4,7 @@ Status: implemented locally and undergoing final review; no production provision
 
 ## Boundaries
 
-Solo remains local without login. Collaborative, shared-board duel and territory
+Solo remains local without login. Collaborative and territory
 all require authenticated accounts and a trusted game server. The server owns
 hidden information, validates moves and publishes only a public projection.
 Kuncat accounts belong to the platform, not Avoidant or games.kuncat.com.
@@ -14,10 +14,8 @@ flowchart TD
   UI[Avoidant] --> Mode{Mode}
   Mode --> Solo[Local Rust WASM]
   Mode --> Coop[Collaborative]
-  Coop --> API
-  Mode --> Duel[Shared-board duel]
+  Coop --> API[Authenticated game Worker]
   Mode --> Territory[Territory]
-  Duel --> API[Authenticated game Worker]
   Territory --> API
   API --> Room[One Durable Object per match]
   Room --> Rules[Competitive Rust WASM]
@@ -29,11 +27,7 @@ flowchart TD
 
 ## Rules to implement
 
-Duel is turn-based, two players, one selected cell per turn. Only the selected
-cell scores (+1 safe, -5 void); flood cells supply public information and earn no
-points. No extra turns or global completion bonus. End when all safe cells are
-revealed, all players pass consecutively, or the match deadline expires. Ties
-are draws. Collaborative mode instead sums teammate contributions: each newly revealed safe
+Collaborative mode sums teammate contributions: each newly revealed safe
 cell adds one team point and a void costs five; there is no individual winner.
 It supports 2–8 players, no turns or territory ownership, and late joins during
 play. The shared goal is to reveal all safe cells before the session deadline.
@@ -226,7 +220,7 @@ flowchart TD
 
 Implemented across Avoidant, sibling kuncat.com, and sibling infra:
 
-- Collaborative play now shares the authenticated authority with duel and territory; the peer-hosted menu path is removed.
+- Collaborative play now shares the authenticated authority with territory; the peer-hosted menu path is removed.
 - Competitive Rust rules run only on the trusted match authority; clients receive
   public snapshots and use a separate board adapter. Territory visibility and
   ownership are separate, with all three requested setup options.
@@ -348,15 +342,15 @@ flowchart TD
   Menu[New Game: shared map and size controls] --> Solo[Local solo game]
   Menu --> Login{Logged in?}
   Login -->|No| Disabled[Three disabled multiplayer cards]
-  Login -->|Yes| Modes[Collaborative / Duel / Territory]
+  Login -->|Yes| Modes[Collaborative / Territory]
   Modes --> Lobby[Shared authenticated lobby and invitation link]
   Lobby --> Authority[Durable Object + Rust rules]
   Authority --> Shared[Collaborative shared reveals and team score]
-  Authority --> Competitive[Duel turns or territory claims]
+  Authority --> Competitive[Territory claims]
 ```
 
 The shared setup uses DaisyUI buttons, selects, inputs and checkboxes. Solo and
-all three multiplayer modes have SVG illustrations in matching cards. Map-size
+both multiplayer modes have SVG illustrations in matching cards. Map-size
 illustrations use irregular quadrilaterals and triangles rather than a hexagonal
 grid. The same DaisyUI plugin and themes are configured for development and the
 production games site.

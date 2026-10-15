@@ -19,7 +19,7 @@ export interface Snapshot {
   turnDeadline: number;
   turn: number | null;
   options: {
-    mode: "collaborative" | "duel" | "territory";
+    mode: "collaborative" | "territory";
     bordering: boolean;
     floodLimit: number | null;
     turnBased: boolean;

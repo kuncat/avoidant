@@ -109,7 +109,7 @@ domains and Durable Object migration. REQUIRE_ENTITLEMENT=false permits all
 verified Kuncat accounts; true requires `avoidant:competitive` from PostgreSQL.
 Billing/checkout is not implemented.
 
-Current bounds: 2 players for duel, 2–8 for territory, 16 sockets per room, 60 lobby
+Current bounds: 2–8 players for collaborative and territory, 16 sockets per room, 60 lobby
 requests/account/hour, 10 messages/socket/second, 400 ms action cooldown, host-configured
 turns (1–86400 seconds or disabled; default 30), matches (1–1440 minutes from start; default 20), 10-minute unstarted-lobby expiry, one-minute completed
 match retention. Persisted rules version is checked on every transition. Login

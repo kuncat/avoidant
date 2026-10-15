@@ -63,9 +63,9 @@ cd crates/game && wasm-pack test --headless --firefox
 
 ## Multiplayer
 
-The existing New Game menu offers Solo, Collaborative, Duel and Territory. All
-three multiplayer modes require a Kuncat account and use the trusted Rust authority.
-Collaborative games share reveals and a team score; duel and territory use their
+The existing New Game menu offers Solo, Collaborative and Territory. All
+multiplayer modes require a Kuncat account and use the trusted Rust authority.
+Collaborative games share reveals and a team score; territory use their
 respective competitive rules. Invitations join through the same menu and login flow.
 Solo stays local and does not require an account. Legacy peer synchronization code
 remains in the Rust library, but its relay settings and host/join paths are no longer
@@ -74,7 +74,7 @@ exposed by the application.
 See [the implementation plan](docs/multiplayer-plan.md) for rules, identity and
 architecture diagrams, and [the server guide](server/README.md) for deployment.
 The component's optional `competitive` configuration supplies the server URL and
-Kuncat account client for all three multiplayer modes. Without configuration,
+Kuncat account client for all multiplayer modes. Without configuration,
 multiplayer controls remain disabled. The sibling website configures shared OIDC;
 the sibling infra repository provisions identity, database and Workers.
 

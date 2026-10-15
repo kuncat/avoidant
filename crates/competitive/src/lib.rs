@@ -18,7 +18,6 @@ const COOLDOWN_MS: u64 = 400;
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
     Collaborative,
-    Duel,
     Territory,
 }
 
@@ -137,10 +136,6 @@ impl Match {
         if options.flood_limit.is_some_and(|v| v > 4096) {
             return Err("Flood limit exceeds board maximum".into());
         }
-        if options.mode == Mode::Duel {
-            options.turn_based = true;
-            options.bordering = false;
-        }
         if options.mode == Mode::Collaborative {
             options.turn_based = false;
             options.bordering = false;
@@ -175,11 +170,7 @@ impl Match {
         if self.players.iter().any(|p| p.id == id) {
             return Ok(());
         }
-        let max = if self.options.mode == Mode::Duel {
-            2
-        } else {
-            8
-        };
+        let max = 8;
         if (self.started && self.options.mode != Mode::Collaborative)
             || self.finished
             || self.players.len() >= max
@@ -624,7 +615,7 @@ mod tests {
         bordered.start("a", 1000).unwrap();
         assert_eq!(bordered.revealed.iter().filter(|v| **v).count(), 2);
         assert!(bordered.players.iter().all(|p| p.claims == 1));
-        for mode in [Mode::Collaborative, Mode::Duel] {
+        for mode in [Mode::Collaborative] {
             let mut shared = g.clone();
             shared.started = false;
             shared.options.mode = mode;

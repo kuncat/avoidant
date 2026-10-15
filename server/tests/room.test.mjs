@@ -158,7 +158,7 @@ test("room state survives runtime restart", async () => {
   try {
     const created = await post(mf, "/matches", {
       map: "medium",
-      mode: "duel",
+      mode: "territory",
       bordering: false,
       turnBased: true,
       floodLimit: null,
@@ -187,7 +187,7 @@ test("expired authentication cannot move on an existing socket", async () => {
   try {
     const created = await post(mf, "/matches", {
       map: "small",
-      mode: "duel",
+      mode: "territory",
       bordering: false,
       turnBased: true,
       floodLimit: 0,
@@ -269,7 +269,7 @@ test("host durations are bounded and disabled turn timers retain only match expi
   try {
     const options = {
       map: "small",
-      mode: "duel",
+      mode: "territory",
       bordering: false,
       turnBased: true,
       floodLimit: 0,
