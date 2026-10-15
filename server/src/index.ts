@@ -562,7 +562,8 @@ export class MatchRoom extends DurableObject<Env> {
             return;
           }
         }
-        for (const ws of this.ctx.getWebSockets()) ws.close(1000, "Match expired");
+        for (const ws of this.ctx.getWebSockets())
+          ws.close(1000, this.saved?.snapshot.finished ? "Match complete" : "Match expired");
         this.saved = undefined;
         await this.ctx.storage.deleteAll();
         return;

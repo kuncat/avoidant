@@ -5,6 +5,7 @@ export class MatchClient {
   private socket?: WebSocket;
   private pending?: { kind: "move"; sequence: number; action: unknown };
   private stopped = false;
+  private finished = false;
   private retry?: ReturnType<typeof setTimeout>;
   private retryCount = 0;
   constructor(
@@ -59,12 +60,13 @@ export class MatchClient {
         const player = s.players.find((p) => p.id === this.actor);
         if (this.pending && player && player.sequence >= this.pending.sequence)
           this.pending = undefined;
+        this.finished = s.finished;
         this.retryCount = 0;
         this.receive(s, message.map, message.neighbors);
         if (this.pending) this.socket?.send(JSON.stringify(this.pending));
       };
       this.socket.onclose = (event) => {
-        if (this.stopped) return;
+        if (this.stopped || this.finished) return;
         if (event.code === 1000) {
           this.report(m.status_match_expired());
           return;

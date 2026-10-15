@@ -3,7 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { formatDuration } from "$lib/multiplayer/duration";
   import type { MatchSnapshot } from "$lib/multiplayer/types";
-  let { players, turnBased }: { players: MatchSnapshot["players"]; turnBased: boolean } = $props();
+  let { players }: { players: MatchSnapshot["players"] } = $props();
 </script>
 
 <div class="overflow-x-auto">
@@ -25,5 +25,4 @@
         >{/each}</tbody
     >
   </table>
-  <p class="text-xs opacity-70">{turnBased ? m.help_turn_time() : m.help_participation_time()}</p>
 </div>

@@ -37,6 +37,8 @@ h1 {
 
 /* Keep the original Avoidant palette while using DaisyUI components. */
 .panel-wrapper {
+  --color-error: var(--color-rose-500);
+  --color-error-content: color-mix(in oklab, white 90%, transparent);
   --color-primary: var(--color-sky-600);
   --color-primary-content: color-mix(in oklab, white 90%, transparent);
   --color-secondary: var(--color-slate-200);

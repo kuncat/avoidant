@@ -81,7 +81,7 @@
         <p class="text-sm opacity-70">
           {new Date(match.finishedAt).toLocaleString(getLocale())}
         </p>
-        <MatchResults players={match.players} turnBased={match.options.turnBased} />
+        <MatchResults players={match.players} />
         {#if match.replayAvailable}<button
             class="btn mt-2 btn-sm"
             disabled={downloading !== null}

@@ -152,7 +152,7 @@
   "field_invitation_link": "Invitation link",
   "action_copied": "Copied",
   "action_copy_invitation": "Copy invitation link",
-  "text_waiting_lobby": "Waiting in lobby. Share the invitation link; the creator starts once everyone has joined.",
+  "text_waiting_lobby": "Waiting in lobby. Share the invitation link; the host starts once everyone has joined.",
   "action_start_match": "Start match",
   "status_session_complete": "Session complete",
   "status_match_complete": "Match complete",

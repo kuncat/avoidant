@@ -128,3 +128,21 @@ Chrome executable). This test follows the regular menu and invitation flow using
 The root Cargo.lock is now tracked because server releases need locked Rust builds.
 
 Player names reuse the browser’s `avoidant:playerName` preference and default to the signed-in profile username when no custom name is saved. The authoritative lobby validates and broadcasts names; names stay fixed during play. Restart the local multiplayer launcher after server/rules changes so its bundled Worker includes the latest protocol.
+
+## First exploration, Territory scores, and replay
+
+On a board with no revealed cells, the first accepted selection is guaranteed
+safe. If it selects a void, the rules swap that void with the lowest-index safe
+cell before revealing anything, preserving the void count. Once any cell is
+revealed, the void layout is fixed; this does not grant each player a separate
+safe first move. Bordering matches already reveal safe starting territories.
+
+Territory scores equal the number of cells owned. Discovering a void does not
+subtract points; flood reveals remain neutral until individually claimed.
+Collaborative scoring retains its existing void penalty, and solo is unchanged.
+
+The initial private state contains the original void layout. Recorded commands
+contain the selected cell and server time, and each command references the
+archived rules engine hash. Relocation uses no new randomness, so replay applies
+the same swap. Archived engine bundles preserve historical rules across future
+deployments; initial-state and replay endpoints remain participant-only.

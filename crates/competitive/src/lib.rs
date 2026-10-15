@@ -376,9 +376,18 @@ impl Match {
                 }
                 self.passes = 0;
                 let before = self.revealed.iter().filter(|&&v| v).count();
+                // Only an unopened board may change: already-visible clues stay valid.
+                // Stable index order makes relocation reproducible from saved state + command.
+                if self.voids[cell] && !self.revealed.iter().any(|&v| v) {
+                    let replacement = (0..self.voids.len()).find(|&i| !self.voids[i]).unwrap();
+                    self.voids[cell] = false;
+                    self.voids[replacement] = true;
+                }
                 self.reveal(cell);
                 if self.voids[cell] {
-                    self.players[p].score -= 5;
+                    if self.options.mode == Mode::Collaborative {
+                        self.players[p].score -= 5;
+                    }
                     self.players[p].voids += 1;
                 } else {
                     self.players[p].score += if self.options.mode == Mode::Collaborative {
@@ -391,6 +400,11 @@ impl Match {
                         self.players[p].claims += 1;
                     }
                 }
+            }
+        }
+        if self.options.mode == Mode::Territory {
+            for player in &mut self.players {
+                player.score = player.claims as i32;
             }
         }
         self.players[p].sequence = sequence;
@@ -575,6 +589,44 @@ fn run(state: &str, command: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn first_void_selection_is_safe_and_replays_exactly() {
+        for mode in [Mode::Territory, Mode::Collaborative] {
+            let mut g = game(Some(0), false);
+            g.options.mode = mode;
+            let initial = serde_json::to_string(&g).unwrap();
+            let cell = g.voids.iter().position(|&v| v).unwrap();
+            let count = g.voids.iter().filter(|&&v| v).count();
+            let command = serde_json::json!({"kind":"move", "actor":"b", "sequence":1,
+                "action":{"kind":"select", "cell":cell}, "now":2000})
+            .to_string();
+            let first = run(&initial, &command).unwrap();
+            assert_eq!(first, run(&initial, &command).unwrap());
+            let result: serde_json::Value = serde_json::from_str(&first).unwrap();
+            let mut restored: Match =
+                serde_json::from_str(result["state"].as_str().unwrap()).unwrap();
+            assert!(!restored.voids[cell]);
+            assert!(restored.revealed[cell]);
+            assert_eq!(restored.voids.iter().filter(|&&v| v).count(), count);
+            // Later selections do not move voids or alter previous clues.
+            let board = restored.voids.clone();
+            let next = board.iter().position(|&v| v).unwrap();
+            restored
+                .act("b", 2, Action::Select { cell: next }, 3000)
+                .unwrap();
+            assert_eq!(restored.voids, board);
+            assert_eq!(restored.players[1].voids, 1);
+            assert_eq!(
+                restored.players[1].score,
+                if mode == Mode::Territory { 1 } else { -4 }
+            );
+            assert_eq!(
+                restored.players[1].claims,
+                if mode == Mode::Territory { 1 } else { 0 }
+            );
+        }
+    }
+
     #[test]
     fn player_names_are_validated_persisted_and_stable_during_play() {
         let mut g = game(Some(0), false);
