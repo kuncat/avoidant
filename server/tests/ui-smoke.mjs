@@ -201,6 +201,14 @@ try {
     await a.waitForTimeout(450);
     await a.getByRole("button", { name: "Pass", exact: true }).click();
     await a.getByText("Match complete", { exact: false }).waitFor();
+    await a.getByRole("columnheader", { name: "Total time", exact: true }).waitFor();
+    await a.screenshot({ path: `${scratch}/results.png` });
+    await a.getByRole("button", { name: "Exit", exact: true }).click();
+    await a.getByRole("button", { name: "Game history", exact: true }).click();
+    await a.getByRole("columnheader", { name: "Total time", exact: true }).first().waitFor();
+    await a.getByRole("cell", { name: "Asha", exact: true }).first().waitFor();
+    await a.getByRole("cell", { name: "Bela", exact: true }).first().waitFor();
+    await a.screenshot({ path: `${scratch}/history.png` });
   }
   const locked = await context.newPage();
   await locked.goto(`${harness.url}?actor=logged-out`);

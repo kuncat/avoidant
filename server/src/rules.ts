@@ -16,6 +16,8 @@ export interface Snapshot {
   started: boolean;
   finished: boolean;
   deadline: number;
+  startedAt: number | null;
+  finishedAt: number | null;
   turnDeadline: number;
   turn: number | null;
   options: {
@@ -33,6 +35,7 @@ export interface Snapshot {
     claims: number;
     voids: number;
     sequence: number;
+    cumulativeMs: number;
   }[];
   cells: { revealed: boolean; isVoid?: boolean; count?: number; owner: number | null }[];
 }

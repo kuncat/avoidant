@@ -174,6 +174,8 @@ test("room state survives runtime restart", async () => {
     mf = runtime("false", persist);
     const restored = await connect(mf, id, "a");
     const after = (await restored.next((m) => m.type === "snapshot")).snapshot;
+    assert.ok(after.players[0].cumulativeMs >= before.players[0].cumulativeMs);
+    before.players[0].cumulativeMs = after.players[0].cumulativeMs;
     assert.deepEqual(after, before);
     restored.ws.close();
   } finally {
@@ -302,5 +304,62 @@ test("host durations are bounded and disabled turn timers retain only match expi
     b.ws.close();
   } finally {
     await mf.dispose();
+  }
+});
+
+test("completed times survive restart in private history", async () => {
+  const persist = mkdtempSync(`${tmpdir()}/avoidant-history-`);
+  let mf = runtime("false", persist);
+  try {
+    const { id } = await (
+      await post(mf, "/matches", {
+        map: "small",
+        mode: "territory",
+        bordering: false,
+        turnBased: true,
+        floodLimit: 0,
+        turnSeconds: null,
+      })
+    ).json();
+    const a = await connect(mf, id, "a", "Asha");
+    const b = await connect(mf, id, "b", "Bela");
+    a.ws.send(JSON.stringify({ kind: "start" }));
+    await a.next((m) => m.type === "snapshot" && m.snapshot.started);
+    a.ws.send(JSON.stringify({ kind: "move", sequence: 1, action: { kind: "pass" } }));
+    await b.next((m) => m.type === "snapshot" && m.snapshot.turn === 1);
+    b.ws.send(JSON.stringify({ kind: "move", sequence: 1, action: { kind: "pass" } }));
+    const { snapshot } = await b.next((m) => m.type === "snapshot" && m.snapshot.finished);
+    assert.equal(
+      snapshot.players.reduce((sum, p) => sum + p.cumulativeMs, 0),
+      snapshot.finishedAt - snapshot.startedAt,
+    );
+    a.ws.close();
+    b.ws.close();
+    await mf.dispose();
+    mf = runtime("false", persist);
+    for (const actor of ["a", "b", "c"]) {
+      const response = await mf.dispatchFetch("https://game.example/history", {
+        headers: headers(actor),
+      });
+      assert.equal(response.status, 200);
+      const { matches } = await response.json();
+      assert.equal(matches.length, actor === "c" ? 0 : 1);
+      if (matches.length) {
+        assert.equal(matches[0].id, id);
+        assert.deepEqual(
+          matches[0].players.map((p) => p.cumulativeMs),
+          snapshot.players.map((p) => p.cumulativeMs),
+        );
+        assert.equal(matches[0].cells, undefined);
+      }
+    }
+    assert.equal(
+      (await mf.dispatchFetch("https://game.example/history", { headers: headers("invalid") }))
+        .status,
+      401,
+    );
+  } finally {
+    await mf.dispose();
+    rmSync(persist, { recursive: true, force: true });
   }
 });

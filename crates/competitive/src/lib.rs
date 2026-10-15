@@ -45,6 +45,8 @@ pub struct Player {
     pub claims: u32,
     pub voids: u32,
     pub sequence: u32,
+    #[serde(default)]
+    pub cumulative_ms: u64,
     pub last_action: Option<u64>,
 }
 
@@ -65,6 +67,12 @@ pub struct Match {
     turn_deadline: u64,
     deadline: u64,
     passes: usize,
+    #[serde(default)]
+    started_at: Option<u64>,
+    #[serde(default)]
+    finished_at: Option<u64>,
+    #[serde(default)]
+    accounted_at: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,6 +99,8 @@ pub struct Snapshot {
     pub turn: Option<usize>,
     pub turn_deadline: u64,
     pub deadline: u64,
+    pub started_at: Option<u64>,
+    pub finished_at: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +171,9 @@ impl Match {
             turn_deadline: 0,
             deadline: 0,
             passes: 0,
+            started_at: None,
+            finished_at: None,
+            accounted_at: None,
         };
         game.join(creator)?;
         Ok(game)
@@ -185,6 +198,7 @@ impl Match {
             claims: 0,
             voids: 0,
             sequence: 0,
+            cumulative_ms: 0,
             last_action: None,
         });
         self.revision += 1;
@@ -218,6 +232,9 @@ impl Match {
             return Err("Cannot start match".into());
         }
         self.started = true;
+        self.started_at = Some(now);
+        self.accounted_at = Some(now);
+        self.finished_at = None;
         self.deadline = now + self.options.match_minutes * 60_000;
         self.turn_deadline = self.options.turn_seconds.map_or(0, |s| now + s * 1000);
         // Spread starts by graph distance; no claim of equal terrain difficulty.
@@ -260,26 +277,46 @@ impl Match {
         Ok(())
     }
 
+    fn account_time(&mut self, until: u64) {
+        let previous = self.accounted_at.unwrap_or(until);
+        let elapsed = until.saturating_sub(previous);
+        if self.options.turn_based {
+            self.players[self.turn].cumulative_ms += elapsed;
+        } else {
+            for player in &mut self.players {
+                player.cumulative_ms += elapsed;
+            }
+        }
+        self.accounted_at = Some(previous.max(until));
+    }
+
     pub fn tick(&mut self, now: u64) {
         if !self.started || self.finished {
             return;
         }
-        if now >= self.deadline {
-            self.finished = true;
-            self.revision += 1;
-            return;
-        }
+        let until = now.min(self.deadline);
         if self.options.turn_based
             && let Some(seconds) = self.options.turn_seconds
-            && now >= self.turn_deadline
         {
-            let turn_ms = seconds * 1000;
-            // Each missed turn is a pass. Entire abandoned matches finish promptly.
-            let skipped = ((now - self.turn_deadline) / turn_ms + 1) as usize;
-            self.passes += skipped;
-            self.turn = (self.turn + skipped) % self.players.len();
-            self.turn_deadline += skipped as u64 * turn_ms;
-            self.finished = self.passes >= self.players.len();
+            // At most one full round: consecutive timeouts finish the match.
+            while self.turn_deadline <= until {
+                self.account_time(self.turn_deadline);
+                self.passes += 1;
+                let ended = self.turn_deadline;
+                self.turn = (self.turn + 1) % self.players.len();
+                self.turn_deadline += seconds * 1000;
+                self.revision += 1;
+                if self.passes >= self.players.len() {
+                    self.finished = true;
+                    self.finished_at = Some(ended);
+                    return;
+                }
+            }
+        }
+        self.account_time(until);
+        if now >= self.deadline {
+            self.finished = true;
+            self.finished_at = Some(self.deadline);
             self.revision += 1;
         }
     }
@@ -291,6 +328,7 @@ impl Match {
         action: Action,
         now: u64,
     ) -> Result<(), String> {
+        self.tick(now);
         let p = self
             .players
             .iter()
@@ -368,6 +406,9 @@ impl Match {
                         self.owners[i].is_some()
                     }
             });
+        if self.finished {
+            self.finished_at = Some(now.min(self.deadline));
+        }
         self.revision += 1;
         Ok(())
     }
@@ -433,6 +474,8 @@ impl Match {
             turn: self.options.turn_based.then_some(self.turn),
             turn_deadline: self.turn_deadline,
             deadline: self.deadline,
+            started_at: self.started_at,
+            finished_at: self.finished_at,
         }
     }
 }
@@ -450,6 +493,8 @@ enum Command {
     Join {
         actor: String,
         name: Option<String>,
+        #[serde(default)]
+        now: u64,
     },
     Start {
         actor: String,
@@ -500,7 +545,10 @@ fn run(state: &str, command: &str) -> Result<String, String> {
                 return Err("Incompatible saved match".into());
             }
             let result = match c {
-                Command::Join { actor, name } => g.join_named(actor, name),
+                Command::Join { actor, name, now } => {
+                    g.tick(now);
+                    g.join_named(actor, name)
+                }
                 Command::Start { actor, now } => g.start(&actor, now),
                 Command::Move {
                     actor,
@@ -739,5 +787,48 @@ mod tests {
             serde_json::to_value(g.snapshot()).unwrap(),
             serde_json::to_value(restored.snapshot()).unwrap()
         );
+    }
+    #[test]
+    fn cumulative_turn_time_survives_restore_and_stops_at_finish() {
+        let mut g = game(Some(0), true);
+        g.act("a", 1, Action::Pass, 2500).unwrap();
+        let mut g: Match = serde_json::from_str(&serde_json::to_string(&g).unwrap()).unwrap();
+        g.act("a", 1, Action::Pass, 3000).unwrap(); // duplicate does not reset B's clock
+        g.act("b", 1, Action::Pass, 5000).unwrap();
+        g.tick(100000);
+        assert_eq!(g.players[0].cumulative_ms, 1500);
+        assert_eq!(g.players[1].cumulative_ms, 2500);
+        assert_eq!(g.finished_at, Some(5000));
+    }
+
+    #[test]
+    fn delayed_timeout_allocates_each_turn_without_counting_after_finish() {
+        let mut g = game(Some(0), true);
+        g.tick(999999);
+        assert_eq!(g.players[0].cumulative_ms, 30000);
+        assert_eq!(g.players[1].cumulative_ms, 30000);
+        assert_eq!(g.finished_at, Some(61000));
+    }
+
+    #[test]
+    fn simultaneous_time_starts_at_join_and_clips_to_expiration() {
+        let mut g = game(Some(0), false);
+        g.options.mode = Mode::Collaborative;
+        g.tick(4000);
+        g.join("c".into()).unwrap();
+        g.tick(g.deadline + 999999);
+        assert_eq!(g.players[0].cumulative_ms, g.deadline - 1000);
+        assert_eq!(g.players[1].cumulative_ms, g.deadline - 1000);
+        assert_eq!(g.players[2].cumulative_ms, g.deadline - 4000);
+        assert_eq!(g.finished_at, Some(g.deadline));
+    }
+
+    #[test]
+    fn unlimited_turn_time_clips_to_match_expiration() {
+        let mut g = game(Some(0), true);
+        g.options.turn_seconds = None;
+        g.tick(g.deadline + 5000);
+        assert_eq!(g.players[0].cumulative_ms, g.deadline - 1000);
+        assert_eq!(g.players[1].cumulative_ms, 0);
     }
 }

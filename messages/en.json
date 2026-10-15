@@ -206,5 +206,12 @@
   "help_void_fraction": "Fraction of cells that are voids. For example, 0.15 means about 15%. Higher values make safe cells harder to find.",
   "help_spikiness": "Adjust the unevenness of the terrain. Higher values produce sharper peaks.",
   "help_seed": "The same seed and map settings reproduce the same board. Use the dice button to choose a random seed.",
-  "option_help": "Help: {label}"
+  "option_help": "Help: {label}",
+  "action_game_history": "Game history",
+  "label_cumulative_time": "Total time",
+  "help_turn_time": "Time spent on turns, including timeouts and disconnected time (hours:minutes:seconds).",
+  "help_participation_time": "Elapsed time from joining play until the match ends, including disconnected time (hours:minutes:seconds).",
+  "error_history": "Could not load game history. Try again.",
+  "history_empty": "Completed multiplayer games will appear here.",
+  "action_load_more": "Load more"
 }

@@ -6,6 +6,7 @@
   import { writable } from "svelte/store";
   import { Canvas, T } from "@threlte/core";
   import { WebGLRenderer } from "three";
+  import MatchResults from "./MatchResults.svelte";
   import ScoreSummary from "./ScoreSummary.svelte";
   import Board from "./board.svelte";
   import MapControls from "./MapControls.svelte";
@@ -388,6 +389,10 @@
           <button class="btn btn-error" onclick={leave}>{m.action_exit()}</button>
         </div>
       </div>
+      {#if snapshot?.finished}<MatchResults
+          players={snapshot.players}
+          turnBased={snapshot.options.turnBased}
+        />{/if}
       {#if message}
         <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
           <p role="status" class="text-amber-300">{message}</p>

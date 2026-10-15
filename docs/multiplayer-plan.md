@@ -354,3 +354,51 @@ both multiplayer modes have SVG illustrations in matching cards. Map-size
 illustrations use irregular quadrilaterals and triangles rather than a hexagonal
 grid. The same DaisyUI plugin and themes are configured for development and the
 production games site.
+
+## Player time and completed game history
+
+The trusted Rust state accumulates milliseconds per player. Turn-based games count
+only the current player's turn, including timeouts and disconnections. Simultaneous
+games count elapsed participation from start (or a late collaborative join) until
+completion, including disconnected time. Lobby time is excluded. Delayed alarms
+allocate each expired turn separately and never count past the actual finish or
+match deadline. Persisted checkpoints prevent reconnects from resetting totals.
+Existing matches without checkpoints begin timing on their first updated event.
+
+```mermaid
+sequenceDiagram
+  participant Player
+  participant Room as Match Durable Object
+  participant Rules as Rust rules
+  participant History as Each participant's history object
+  Player->>Room: Action or reconnect
+  Room->>Rules: Advance authoritative clock
+  Rules-->>Room: Snapshot and cumulative milliseconds
+  Room->>Room: Persist state and next alarm
+  alt Finished
+    Room->>History: Idempotent result keyed by finish time and match ID
+    Room-->>Player: Final scores and time
+    Room->>Room: Cleanup alarm after one minute
+  end
+```
+
+Each authenticated account can read its own paginated history using `GET /history`.
+Results include participant names, scores, claims, void counts, configuration, map,
+and timing; they exclude hidden board data and credentials. The menu's Game history
+view and the final results table share a translated display in hours:minutes:seconds.
+Archive writes finish before live state is deleted; failures are retried by the
+cleanup alarm. History remains available after room deletion or runtime restart.
+
+```mermaid
+flowchart LR
+  Login[Kuncat account] --> API[Authenticated history endpoint]
+  API --> H[Account history Durable Object]
+  R[Completed match] --> H
+  R --> C[Delete live room state]
+  H --> UI[Game history menu]
+```
+
+History reuses the existing `MATCHES` namespace with `history:<account ID>` objects.
+These have no periodic alarms or resident process. Records are retained in durable
+storage and paginated 50 at a time; storage grows with completed matches. No new
+Terraform resource or PostgreSQL schema is required.

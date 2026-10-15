@@ -13,6 +13,8 @@ interface Saved {
   snapshot: Snapshot;
   map: keyof typeof catalog;
   created: number;
+  id?: string;
+  archived?: boolean;
   cleanupAt?: number;
 }
 interface Attachment {
@@ -76,8 +78,10 @@ export default {
         return await env.MATCHES.get(env.MATCHES.idFromName(match[1])).fetch(request);
       }
       if (
-        request.method !== "POST" ||
-        (url.pathname !== "/matches" && !(match && uuid.test(match[1]) && match[2] === "connect"))
+        !(request.method === "GET" && url.pathname === "/history") &&
+        (request.method !== "POST" ||
+          (url.pathname !== "/matches" &&
+            !(match && uuid.test(match[1]) && match[2] === "connect")))
       )
         return reply({ error: "Not found" }, 404);
       const authorization = request.headers.get("Authorization");
@@ -103,6 +107,15 @@ export default {
         account.expiresAt <= Date.now()
       )
         throw new Error("Invalid account response");
+      if (url.pathname === "/history") {
+        const historyUrl = new URL("https://internal/history");
+        const cursor = url.searchParams.get("cursor");
+        if (cursor) historyUrl.searchParams.set("cursor", cursor);
+        const history = await env.MATCHES.get(
+          env.MATCHES.idFromName(`history:${account.id}`),
+        ).fetch(historyUrl);
+        return reply(await history.json(), history.status);
+      }
       if (
         env.REQUIRE_ENTITLEMENT !== "false" &&
         !account.capabilities.includes("avoidant:competitive")
@@ -142,7 +155,7 @@ export default {
         response = await env.MATCHES.get(env.MATCHES.idFromName(id)).fetch(
           new Request("https://internal/create", {
             method: "POST",
-            body: JSON.stringify({ ...input, actor: account.id }),
+            body: JSON.stringify({ ...input, actor: account.id, id }),
           }),
         );
         if (response.ok) response = reply({ id }, 201);
@@ -180,8 +193,10 @@ export default {
 
 export class MatchRoom extends DurableObject<Env> {
   private saved?: Saved;
+  private environment: Env;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.environment = env;
     ctx.blockConcurrencyWhile(async () => {
       this.saved = await ctx.storage.get<Saved>("match");
     });
@@ -205,6 +220,45 @@ export class MatchRoom extends DurableObject<Env> {
         ? Math.min(s.deadline, s.turn === null || !s.turnDeadline ? s.deadline : s.turnDeadline)
         : this.saved.created + 10 * 60_000;
     await this.ctx.storage.setAlarm(alarm);
+    if (s.finished) {
+      try {
+        await this.archive();
+      } catch {
+        /* The cleanup alarm retries before deleting state. */
+      }
+    }
+  }
+  private async archive() {
+    const saved = this.saved;
+    if (!saved || saved.archived || !saved.snapshot.finished) return;
+    const snapshot = saved.snapshot;
+    const record = {
+      id: saved.id ?? this.ctx.id.toString(),
+      map: saved.map,
+      options: snapshot.options,
+      startedAt: snapshot.startedAt,
+      finishedAt: snapshot.finishedAt ?? saved.cleanupAt! - 60_000,
+      players: snapshot.players.map(({ id, name, score, claims, voids, cumulativeMs }) => ({
+        id,
+        name,
+        score,
+        claims,
+        voids,
+        cumulativeMs: cumulativeMs ?? 0,
+      })),
+    };
+    await Promise.all(
+      record.players.map(async (player) => {
+        const response = await this.environment.MATCHES.get(
+          this.environment.MATCHES.idFromName(`history:${player.id}`),
+        ).fetch(
+          new Request("https://internal/history", { method: "POST", body: JSON.stringify(record) }),
+        );
+        if (!response.ok) throw new Error("History persistence failed");
+      }),
+    );
+    saved.archived = true;
+    await this.ctx.storage.put("match", saved);
   }
   private broadcast() {
     const payload = JSON.stringify({
@@ -225,6 +279,30 @@ export class MatchRoom extends DurableObject<Env> {
     // Serialize fetch and WS mutations across every awaited storage operation.
     return this.ctx.blockConcurrencyWhile(async () => {
       const url = new URL(request.url);
+      if (url.pathname === "/history") {
+        if (request.method === "POST") {
+          const record = (await request.json()) as { id: string; finishedAt: number };
+          const key = `history:${String(record.finishedAt).padStart(16, "0")}:${record.id}`;
+          if (!(await this.ctx.storage.get(key))) await this.ctx.storage.put(key, record);
+          return json({ ok: true });
+        }
+        const cursor = url.searchParams.get("cursor");
+        if (cursor && (!cursor.startsWith("history:") || cursor.length > 150))
+          return json({ error: "Invalid cursor" }, 400);
+        const entries = [
+          ...(await this.ctx.storage.list({
+            prefix: "history:",
+            reverse: true,
+            limit: 51,
+            ...(cursor ? { end: cursor } : {}),
+          })),
+        ];
+        const page = entries.slice(0, 50);
+        return json({
+          matches: page.map(([, record]) => record),
+          nextCursor: entries.length > 50 ? page[49][0] : null,
+        });
+      }
       if (url.pathname === "/quota") {
         const now = Date.now();
         const quota = (await this.ctx.storage.get<{ start: number; count: number }>("quota")) ?? {
@@ -251,6 +329,7 @@ export class MatchRoom extends DurableObject<Env> {
           matchMinutes?: number;
           turnSeconds?: number | null;
           actor: string;
+          id: string;
         };
         const seed = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
           b.toString(16).padStart(2, "0"),
@@ -275,6 +354,7 @@ export class MatchRoom extends DurableObject<Env> {
           snapshot: result.snapshot,
           map: input.map,
           created: Date.now(),
+          id: input.id,
         };
         await this.persist(result);
         return json({ ok: true });
@@ -286,7 +366,12 @@ export class MatchRoom extends DurableObject<Env> {
           authExpires: number;
           name?: string;
         };
-        const result = await rules(this.saved.state, { kind: "join", actor, name });
+        const result = await rules(this.saved.state, {
+          kind: "join",
+          actor,
+          name,
+          now: Date.now(),
+        });
         if (result.error) return json({ error: result.error }, 409);
         await this.persist(result);
         const ticket = crypto.randomUUID();
@@ -392,6 +477,7 @@ export class MatchRoom extends DurableObject<Env> {
   async alarm() {
     await this.ctx.blockConcurrencyWhile(async () => {
       if (!this.saved || this.saved.snapshot.finished || !this.saved.snapshot.started) {
+        if (this.saved?.snapshot.finished) await this.archive();
         for (const ws of this.ctx.getWebSockets()) ws.close(1000, "Match expired");
         this.saved = undefined;
         await this.ctx.storage.deleteAll();

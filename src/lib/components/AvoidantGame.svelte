@@ -3,6 +3,8 @@
   import OptionHelp from "./OptionHelp.svelte";
   import ScoreSummary from "./ScoreSummary.svelte";
   import MapIcon from "./MapIcon.svelte";
+  import GameHistory from "./GameHistory.svelte";
+  let historyOpen = $state(false);
   import MultiplayerGame from "./MultiplayerGame.svelte";
   import type { CompetitiveConfig, MultiplayerSetup } from "$lib/multiplayer/types";
   import { devicePixelRatio } from "svelte/reactivity/window";
@@ -523,6 +525,11 @@
   }
 </script>
 
+{#if historyOpen && competitive}<GameHistory
+    config={competitive}
+    onexit={() => (historyOpen = false)}
+  />{/if}
+
 {#if competitiveOpen && competitive}
   <MultiplayerGame
     bind:playerName={playerNameInput}
@@ -540,7 +547,7 @@
 <div
   data-theme="winter"
   class="panel-wrapper fixed inset-x-0 z-20 flex justify-center bg-transparent select-none"
-  style:display={competitiveOpen && competitive ? "none" : undefined}
+  style:display={historyOpen || (competitiveOpen && competitive) ? "none" : undefined}
   class:[&_*]:text-white={gameState}
   class:panel-wrapper-card={!gameState}
   class:panel-wrapper-header={gameState}
@@ -624,9 +631,9 @@
 
     {#if !gameState}
       <div class="my-3 flex flex-wrap justify-center gap-2">
-        {#if account}<button class="btn btn-secondary btn-sm" onclick={logout}
-            >{m.action_logout()}</button
-          >
+        {#if account}<button class="btn btn-secondary btn-sm" onclick={() => (historyOpen = true)}
+            >{m.action_game_history()}</button
+          ><button class="btn btn-secondary btn-sm" onclick={logout}>{m.action_logout()}</button>
         {:else}<button
             class="btn btn-secondary btn-sm"
             disabled={!competitive}

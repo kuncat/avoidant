@@ -30,6 +30,8 @@ export interface MatchSnapshot {
   turn: number | null;
   turnDeadline: number;
   deadline: number;
+  startedAt: number | null;
+  finishedAt: number | null;
   options: {
     mode: "collaborative" | "territory";
     bordering: boolean;
@@ -45,6 +47,7 @@ export interface MatchSnapshot {
     claims: number;
     voids: number;
     sequence: number;
+    cumulativeMs: number;
   }[];
   cells: { revealed: boolean; isVoid?: boolean; count?: number; owner: number | null }[];
 }
@@ -67,4 +70,13 @@ export interface MultiplayerSetup {
   floodLimit: number | null;
   matchMinutes?: number;
   turnSeconds?: number | null;
+}
+
+export interface MatchHistory {
+  id: string;
+  map: string;
+  options: MatchSnapshot["options"];
+  startedAt: number | null;
+  finishedAt: number;
+  players: MatchSnapshot["players"];
 }
