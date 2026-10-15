@@ -52,7 +52,7 @@ A revealed void is not a valid action. A hidden void costs five points, consumes
 the turn/cooldown, and grants no ownership. Territory ranking uses claims minus
 void penalties. Validate these balance choices through playtesting.
 
-Assign distinct, server-selected safe starting cells before play. They count as
+When bordering is enabled, assign distinct, server-selected safe starting cells before play. Without bordering, the board starts entirely unexplored with no initial claims or points. Starting cells count as
 one territory each and do not flood. The void layout uses independent secret
 randomness, never the public geometry seed. Starts are guaranteed safe but not
 claimed to be equally advantageous. Initial competitive maps are server-approved
@@ -245,9 +245,11 @@ Terraform validation. Live provider login, email delivery and deployed-region
 latency remain production smoke tests after credentials are configured.
 
 Initial limits and review choices: competitive maps use all eight shapes at three standard sizes; flood limit counts additional cells; each selected safe cell scores one,
-voids cost five; starts are spread out but not guaranteed equal in difficulty.
-The match clock is 20 minutes with 30-second turns. New competitive UI copy is
-English. Billing, long-term match history and leaderboards are not implemented.
+voids cost five; bordering-mode starts are spread out but not guaranteed equal in difficulty.
+Hosts choose a match duration of 1–1440 minutes (20 by default), measured from match start.
+Turn-based modes allow a 1–86400 second turn timer (30 by default), or no turn timer.
+The server enforces both clocks; disabling turn timing leaves match expiry active.
+Multiplayer UI copy is available in English and Bengali. Billing, long-term match history and leaderboards are not implemented.
 
 No infrastructure apply, package publication or commits have been performed.
 Proposed review/commit groups: Avoidant gameplay/server, Kuncat account/site

@@ -168,5 +168,20 @@
   "field_map": "ম্যাপ",
   "label_gameplay_options": "খেলার বিকল্প",
   "label_map_options": "ম্যাপের বিকল্প",
-  "label_custom_map_options": "কাস্টম ম্যাপের বিকল্প"
+  "label_custom_map_options": "কাস্টম ম্যাপের বিকল্প",
+  "status_named_turn": "{name}-এর পালা",
+  "status_named_winner": "{name} জিতেছেন",
+  "action_save_name": "নাম সংরক্ষণ করুন",
+  "error_player_name": "১–৩২ অক্ষরের একটি খেলোয়াড়ের নাম লিখুন।",
+  "field_match_minutes": "খেলার সময়সীমা (মিনিটে, সর্বোচ্চ ২৪ ঘণ্টা)",
+  "field_turn_timer": "পালার সময়সীমা",
+  "field_turn_seconds": "প্রতি পালায় সেকেন্ড",
+  "status_name_saved": "নাম সংরক্ষিত হয়েছে",
+  "error_name_server_update": "খেলোয়াড়ের নাম সমর্থন করতে গেম সার্ভার হালনাগাদ করুন। স্থানীয় বহুজন খেলার সার্ভার আবার চালু করুন।",
+  "error_name_not_saved": "সার্ভার আপনার নাম সংরক্ষণ করেনি। সার্ভার হালনাগাদ করে আবার চেষ্টা করুন।",
+  "label_turn_remaining": "আর {seconds} সেকেন্ড",
+  "field_match_duration": "খেলার সময়সীমা",
+  "field_duration_unit": "সময়ের একক",
+  "unit_minutes": "মিনিট",
+  "unit_hours": "ঘণ্টা"
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import ScoreSummary from "./ScoreSummary.svelte";
   import MapIcon from "./MapIcon.svelte";
   import MultiplayerGame from "./MultiplayerGame.svelte";
   import type { CompetitiveConfig, MultiplayerSetup } from "$lib/multiplayer/types";
@@ -20,6 +21,14 @@
   import { getLocale, locales, setLocale } from "$lib/paraglide/runtime";
   import { generateMap } from "$lib/workers/mapgen-client";
   import { TutorialState } from "$lib/tutorial.svelte";
+
+  const PLAYER_NAME_STORAGE_KEY = "avoidant:playerName";
+  let playerNameInput = $state<string>(m.default_player_name());
+  let playerNameLoaded = $state(false);
+  $effect(() => {
+    if (playerNameLoaded && playerNameInput !== m.default_player_name())
+      localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerNameInput);
+  });
 
   const SETTINGS_STORAGE_KEY = "avoidant:gameSettings:v1";
   const SIZE_PRESETS = { small: 80, medium: 160, large: 320 } as const;
@@ -57,10 +66,14 @@
   let playMode = $state<"solo" | MultiplayerSetup["mode"]>("solo");
   let multiplayerSetup = $state<MultiplayerSetup>();
   let invitation = $state<string>();
-  let bordering = $state(true);
-  let turnBased = $state(false);
+  let bordering = $state(false);
+  let turnBased = $state(true);
   let infiniteFlood = $state(true);
-  let floodLimit = $state(3);
+  let matchDuration = $state(60);
+  let matchUnit = $state<"minutes" | "hours">("minutes");
+  let turnSeconds = $state(5);
+  let turnTimer = $state(true);
+  let floodLimit = $state(0);
   const playModes = [
     { id: "solo", label: m.mode_solo, description: m.mode_solo_hint },
     { id: "collaborative", label: m.mode_collaborative, description: m.mode_collaborative_hint },
@@ -82,6 +95,13 @@
         const current = await config.account.account();
         if (!active) return;
         account = current;
+        if (
+          current?.username &&
+          (!localStorage.getItem(PLAYER_NAME_STORAGE_KEY) ||
+            localStorage.getItem(PLAYER_NAME_STORAGE_KEY) === m.default_player_name())
+        ) {
+          playerNameInput = Array.from(current.username.trim()).slice(0, 32).join("");
+        }
         if (pending) {
           invitation = pending;
           ticketInput = pending;
@@ -160,9 +180,6 @@
   let numSafeUnexploredCells = $derived(
     $score ? Math.max(0, $score.totalCells - $score.voidTotal - $score.safeExplored) : 0,
   );
-  let isScoreBreakdownHovered = $state(false);
-  let isScoreBreakdownPinned = $state(false);
-  let showScoreBreakdown = $derived(isScoreBreakdownHovered || isScoreBreakdownPinned);
   let cameraFov = $state(50);
 
   let selectedCellCount = $derived(
@@ -222,17 +239,6 @@
         ],
   );
 
-  function toggleScoreBreakdown() {
-    isScoreBreakdownPinned = !isScoreBreakdownPinned;
-  }
-
-  function handleScoreSummaryKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      toggleScoreBreakdown();
-    }
-  }
-
   /**
    * Pick a perspective FOV so the bounding sphere of the generated shape (including the maximum elevation displacement) fits the viewport on both axes, with a small margin so cells near the silhouette aren't clipped.
    */
@@ -270,6 +276,8 @@
   }
 
   onMount(() => {
+    playerNameInput = localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || m.default_player_name();
+    playerNameLoaded = true;
     resetRandomSeed();
     try {
       const saved = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? "null");
@@ -314,12 +322,6 @@
   $effect(() => {
     if (!gameState) return;
     setInitialCameraFov();
-  });
-
-  $effect(() => {
-    if (gameState) return;
-    isScoreBreakdownHovered = false;
-    isScoreBreakdownPinned = false;
   });
 
   $effect(() => {
@@ -438,6 +440,8 @@
         bordering: playMode === "territory" && bordering,
         turnBased: playMode === "duel" || (playMode === "territory" && turnBased),
         floodLimit: infiniteFlood ? null : floodLimit,
+        matchMinutes: matchDuration * (matchUnit === "hours" ? 60 : 1),
+        turnSeconds: turnTimer ? turnSeconds : null,
       };
       invitation = undefined;
       competitiveOpen = true;
@@ -521,6 +525,7 @@
 
 {#if competitiveOpen && competitive}
   <MultiplayerGame
+    bind:playerName={playerNameInput}
     config={competitive}
     setup={multiplayerSetup}
     {invitation}
@@ -563,24 +568,8 @@
       </h1>
       {#if gameState}
         {#if $score}
-          <div
-            class="relative text-sm text-slate-600"
-            role="group"
-            aria-label={m.aria_score_summary()}
-            onmouseenter={() => (isScoreBreakdownHovered = true)}
-            onmouseleave={() => (isScoreBreakdownHovered = false)}
-          >
-            <div
-              class="score-summary"
-              role="button"
-              tabindex="0"
-              aria-expanded={showScoreBreakdown}
-              aria-controls="score-breakdown"
-              onclick={toggleScoreBreakdown}
-              onfocus={() => (isScoreBreakdownHovered = true)}
-              onblur={() => (isScoreBreakdownHovered = false)}
-              onkeydown={handleScoreSummaryKeydown}
-            >
+          <ScoreSummary>
+            {#snippet summary()}
               {m.label_score()}:
               <strong class="text-slate-200!"
                 >{Math.round($score.score).toLocaleString(getLocale())}</strong
@@ -603,32 +592,29 @@
                   >
                 </span>
               {/if}
-            </div>
-
-            {#if showScoreBreakdown}
-              <div id="score-breakdown" class="score-breakdown" role="status">
-                {#if $score.streak > 1}<p>
-                    <span class="opacity-70"
-                      >×{(1 + Math.min($score.streak, 10) * 0.1).toLocaleString(getLocale(), {
-                        maximumFractionDigits: 1,
-                      })}
-                      {m.label_streak()}</span
-                    >
-                  </p>
-                {/if}
-                <p class="text-emerald-600!">
-                  {m.label_safe_cells_explored({
-                    count: $score.safeExplored.toLocaleString(getLocale()),
-                  })}:
-                  <strong>{$score.safeExplored.toLocaleString(getLocale())}</strong>
+            {/snippet}
+            {#snippet breakdown()}
+              {#if $score.streak > 1}<p>
+                  <span class="opacity-70"
+                    >×{(1 + Math.min($score.streak, 10) * 0.1).toLocaleString(getLocale(), {
+                      maximumFractionDigits: 1,
+                    })}
+                    {m.label_streak()}</span
+                  >
                 </p>
-                <p class="text-rose-500!">
-                  {m.label_voids_discovered()}:
-                  <strong>{$score.voidExplored.toLocaleString(getLocale())}</strong>
-                </p>
-              </div>
-            {/if}
-          </div>
+              {/if}
+              <p class="text-emerald-600!">
+                {m.label_safe_cells_explored({
+                  count: $score.safeExplored.toLocaleString(getLocale()),
+                })}:
+                <strong>{$score.safeExplored.toLocaleString(getLocale())}</strong>
+              </p>
+              <p class="text-rose-500!">
+                {m.label_voids_discovered()}:
+                <strong>{$score.voidExplored.toLocaleString(getLocale())}</strong>
+              </p>
+            {/snippet}
+          </ScoreSummary>
         {/if}
         <div class="ml-auto flex gap-2">
           <button class="btn btn-error" type="button" onclick={exitGame}>{m.action_exit()}</button>
@@ -722,6 +708,57 @@
               transition:slide={{ duration: 180 }}
             >
               <legend class="fieldset-legend">{m.label_gameplay_options()}</legend>
+              {#if playMode !== "solo"}
+                <label
+                  class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                >
+                  <span>{m.field_player_name()}</span>
+                  <input
+                    class="input w-30 min-w-0 text-right input-sm"
+                    type="text"
+                    maxlength="32"
+                    required
+                    bind:value={playerNameInput}
+                  />
+                </label>
+              {/if}
+              {#if playMode !== "solo"}
+                <div class="flex w-full items-center justify-between gap-4">
+                  <label
+                    class="label text-left whitespace-normal text-base-content"
+                    for="match-duration">{m.field_match_duration()}</label
+                  >
+                  <div class="join w-44 shrink-0">
+                    <input
+                      id="match-duration"
+                      class="input join-item min-w-0 flex-1 text-right input-sm"
+                      type="number"
+                      min="1"
+                      max={matchUnit === "hours" ? 24 : 1440}
+                      step="1"
+                      required
+                      bind:value={matchDuration}
+                    />
+                    <select
+                      class="select join-item w-24 select-sm"
+                      aria-label={m.field_duration_unit()}
+                      value={matchUnit}
+                      onchange={(event) => {
+                        const unit = event.currentTarget.value as "minutes" | "hours";
+                        const minutes = matchDuration * (matchUnit === "hours" ? 60 : 1);
+                        matchDuration = Math.min(
+                          unit === "hours" ? 24 : 1440,
+                          Math.max(1, Math.ceil(unit === "hours" ? minutes / 60 : minutes)),
+                        );
+                        matchUnit = unit;
+                      }}
+                      ><option value="minutes">{m.unit_minutes()}</option><option value="hours"
+                        >{m.unit_hours()}</option
+                      ></select
+                    >
+                  </div>
+                </div>
+              {/if}
               {#if playMode === "solo"}
                 <div class="flex flex-col items-start gap-2" transition:slide={{ duration: 180 }}>
                   <label
@@ -768,15 +805,40 @@
                     </div>
                   </div>
                 {/if}
+                {#if playMode === "duel" || (playMode === "territory" && turnBased)}
+                  <div class="grid gap-2" transition:slide={{ duration: 180 }}>
+                    <label
+                      class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                      ><span>{m.field_turn_timer()}</span><input
+                        type="checkbox"
+                        class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                        bind:checked={turnTimer}
+                      /></label
+                    >
+                    {#if turnTimer}<label
+                        class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                        transition:slide={{ duration: 180 }}
+                        ><span>{m.field_turn_seconds()}</span><input
+                          class="input w-30 text-right input-sm"
+                          type="number"
+                          min="1"
+                          max="86400"
+                          step="1"
+                          required
+                          bind:value={turnSeconds}
+                        /></label
+                      >{/if}
+                  </div>
+                {/if}
                 <div class="form-control flex w-full flex-row items-center justify-between gap-4">
                   <label
                     class="label text-left whitespace-normal text-base-content"
                     for="flood-limit">{m.field_flood_limit()}</label
                   >
-                  <div class="join w-28 shrink-0" role="group" aria-label={m.field_flood_limit()}>
+                  <div class="join w-30 shrink-0" role="group" aria-label={m.field_flood_limit()}>
                     <input
                       id="flood-limit"
-                      class="input join-item min-w-0 flex-1 input-sm focus:outline-none"
+                      class="input join-item min-w-0 flex-1 text-right input-sm focus:outline-none"
                       aria-label={m.field_flood_cells()}
                       type="number"
                       min="1"
@@ -939,7 +1001,7 @@
                         <label
                           class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
                           ><span>{m.field_void_fraction()}</span><input
-                            class="input w-24 input-sm"
+                            class="input w-24 text-right input-sm"
                             max="0.999"
                             min="0"
                             required
@@ -955,7 +1017,7 @@
                         <label
                           class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
                           ><span>{m.field_spikiness()}</span><input
-                            class="input w-16 input-sm"
+                            class="input w-16 text-right input-sm"
                             max="1"
                             min="0"
                             required
@@ -975,7 +1037,7 @@
                         <div class="join w-48 shrink-0" role="group" aria-label={m.field_seed()}>
                           <input
                             id="rng-seed-input"
-                            class="input join-item min-w-0 flex-1 input-sm focus:outline-none"
+                            class="input join-item min-w-0 flex-1 text-right input-sm focus:outline-none"
                             type="number"
                             min="0"
                             max={Number.MAX_SAFE_INTEGER}

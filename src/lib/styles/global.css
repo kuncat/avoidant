@@ -73,7 +73,7 @@ h1 {
 }
 
 .score-breakdown {
-  @apply absolute top-full left-0 z-30 mt-1 min-w-max rounded border border-slate-600 bg-slate-900/95 px-3 py-2 text-xs text-slate-100 shadow-lg;
+  @apply absolute top-full left-0 z-30 mt-1 w-max min-w-0 rounded border border-slate-600 bg-slate-900/95 px-3 py-2 text-xs text-slate-100 shadow-lg;
 }
 
 .score-breakdown p {

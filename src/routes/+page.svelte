@@ -17,7 +17,7 @@
       serverUrl: `http://${window.location.hostname}:${import.meta.env.VITE_LOCAL_COMPETITIVE_PORT}`,
       account: {
         completeLogin: async () => {},
-        account: async () => ({ id: actor, capabilities: [] }),
+        account: async () => ({ id: actor, username: actor, capabilities: [] }),
         token: async () => actor,
         login: async () => {},
         logout: async () => {},

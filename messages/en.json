@@ -177,5 +177,20 @@
   "field_map": "Map",
   "label_gameplay_options": "Gameplay Options",
   "label_map_options": "Map Options",
-  "label_custom_map_options": "Custom Map Options"
+  "label_custom_map_options": "Custom Map Options",
+  "status_named_turn": "{name}'s turn",
+  "status_named_winner": "{name} wins",
+  "action_save_name": "Save name",
+  "error_player_name": "Enter a player name of 1–32 characters.",
+  "field_match_minutes": "Match duration (minutes, up to 24 hours)",
+  "field_turn_timer": "Turn timer",
+  "field_turn_seconds": "Seconds per turn",
+  "status_name_saved": "Name saved",
+  "error_name_server_update": "This game server needs an update to support player names. Restart the local multiplayer server.",
+  "error_name_not_saved": "The server did not save your name. Update the game server and try again.",
+  "label_turn_remaining": "{seconds}s left",
+  "field_match_duration": "Match duration",
+  "field_duration_unit": "Duration unit",
+  "unit_minutes": "Minutes",
+  "unit_hours": "Hours"
 }

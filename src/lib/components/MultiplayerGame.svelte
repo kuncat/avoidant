@@ -6,6 +6,7 @@
   import { writable } from "svelte/store";
   import { Canvas, T } from "@threlte/core";
   import { WebGLRenderer } from "three";
+  import ScoreSummary from "./ScoreSummary.svelte";
   import Board from "./board.svelte";
   import MapControls from "./MapControls.svelte";
   import { generateMap } from "$lib/workers/mapgen-client";
@@ -31,14 +32,17 @@
     onexit,
     setup,
     invitation,
+    playerName = $bindable(),
   }: {
     config: CompetitiveConfig;
     onexit: () => void;
     setup?: MultiplayerSetup;
     invitation?: string;
+    playerName: string;
   } = $props();
   let account = $state<{ id: string; capabilities: string[] } | null>(null);
   let message = $state("");
+  let connectionIssue = $state(false);
   let flat = $state(false);
   let matchId = $state("");
   let snapshot = $state<MatchSnapshot>();
@@ -53,6 +57,9 @@
   const pulses = writable<BoardPulse[]>([]);
   let invitationUrl = $state("");
   let copied = $state(false);
+  let savingName = $state(false);
+  let nameSaved = $state(false);
+  let now = $state(Date.now());
   let renderedSnapshot: MatchSnapshot | undefined;
   let pulseId = 0;
   let clicked: { cell: number; position: [number, number, number] } | undefined;
@@ -128,6 +135,9 @@
     updateMetadata();
   }
   let player = $derived(snapshot?.players.find((p) => p.id === account?.id));
+  function displayName(index: number) {
+    return snapshot?.players[index]?.name || m.default_player_name();
+  }
   let myIndex = $derived(snapshot?.players.findIndex((p) => p.id === account?.id) ?? -1);
   let canPlay = $derived(
     !!snapshot?.started &&
@@ -136,6 +146,7 @@
   );
 
   onMount(() => {
+    const clock = setInterval(() => (now = Date.now()), 1000);
     void (async () => {
       try {
         await init();
@@ -149,6 +160,7 @@
       }
     })();
     return () => {
+      clearInterval(clock);
       disposed = true;
       resetAnimations();
       client?.close();
@@ -159,6 +171,14 @@
     if (snapshot && next.revision < snapshot.revision) return;
     snapshot = next;
     message = "";
+    connectionIssue = false;
+    const own = next.players.find((p) => p.id === account?.id);
+    if (own && own.name === undefined) message = m.error_name_server_update();
+    if (savingName && own) {
+      savingName = false;
+      nameSaved = own.name === playerName.trim();
+      if (!nameSaved) message = m.error_name_not_saved();
+    }
     geometryPromise ??= (async () => {
       const options = (mapOptions as Record<string, GameOptions>)[mapName];
       if (!options) throw new Error(m.error_unsupported_map());
@@ -193,6 +213,13 @@
     }
   }
   function select(cell: number) {
+    const target = snapshot?.cells[cell];
+    if (
+      !target ||
+      target.owner !== null ||
+      (target.revealed && (target.isVoid || snapshot?.options.mode !== "territory"))
+    )
+      return;
     if (canPlay && player) client?.move(player.sequence + 1, { kind: "select", cell });
   }
   async function join() {
@@ -211,7 +238,12 @@
       matchId,
       account.id,
       (s, m, n) => void receive(s, m, n),
-      (m) => (message = m),
+      (m, reconnect) => {
+        message = m;
+        connectionIssue = !!reconnect;
+        savingName = false;
+      },
+      () => playerName,
     );
     const url = new SvelteURL(window.location.href);
     url.search = "";
@@ -259,119 +291,192 @@
   }
 </script>
 
-<div data-theme="night" class="not-prose flex h-dvh flex-col">
+<div data-theme="winter" class="not-prose h-dvh bg-transparent text-white">
   <div
-    class="z-20 m-3 max-h-[60dvh] shrink-0 overflow-y-auto rounded-lg bg-slate-950/90 p-4 text-slate-100"
+    class="panel-wrapper panel-wrapper-header fixed inset-x-0 z-20 flex justify-center bg-transparent"
   >
-    <div class="flex flex-wrap items-center gap-3">
-      <h2 class="m-0 text-xl text-slate-100!">{m.multiplayer_title()}</h2>
-      <button class="btn btn-secondary" onclick={leave}>{m.action_back()}</button>
+    <div class="panel-shell panel-header w-full max-w-full">
+      <div class="flex flex-wrap items-center gap-3">
+        <h1 class="panel-title text-lg font-semibold tracking-wide">Avoidant</h1>
+        {#if snapshot?.started}
+          {@const match = snapshot}
+          <ScoreSummary>
+            {#snippet summary()}
+              {#if match.options.mode === "collaborative"}
+                <strong
+                  >{m.label_team_score({
+                    score: match.players
+                      .reduce((sum, p) => sum + p.score, 0)
+                      .toLocaleString(getLocale()),
+                  })}</strong
+                >
+              {:else}
+                {m.label_score()}:
+                <strong>{(player?.score ?? 0).toLocaleString(getLocale())}</strong>
+              {/if}
+              <span class="opacity-80">
+                {#if match.finished}
+                  {#if match.options.mode === "collaborative"}{m.status_session_complete()}
+                  {:else}
+                    {@const best = Math.max(...match.players.map((p) => p.score))}
+                    {m.status_match_complete()} — {match.players.filter((p) => p.score === best)
+                      .length > 1
+                      ? m.status_draw()
+                      : m.status_named_winner({
+                          name: displayName(match.players.findIndex((p) => p.score === best)),
+                        })}
+                  {/if}
+                {:else if match.turn !== null}
+                  {m.status_named_turn({ name: displayName(match.turn) })}
+                  {#if match.turnDeadline > 0}<span class="tabular-nums">
+                      · {m.label_turn_remaining({
+                        seconds: Math.max(
+                          0,
+                          Math.ceil((match.turnDeadline - now) / 1000),
+                        ).toLocaleString(getLocale()),
+                      })}</span
+                    >{/if}
+                {:else if match.options.mode === "collaborative"}{m.mode_collaborative_hint()}
+                {:else}{m.status_realtime_claims()}{/if}
+              </span>
+            {/snippet}
+            {#snippet breakdown()}
+              <div class="grid gap-2">
+                {#each match.players as p, i (p.id)}
+                  <div class="flex items-start justify-between gap-4">
+                    <span style:color={PLAYER_COLORS[i]}
+                      >{displayName(i)}{p.id === account?.id ? m.label_you() : ""}</span
+                    >
+                    <div class="text-right">
+                      <strong
+                        >{m.label_points({ count: p.score.toLocaleString(getLocale()) })}</strong
+                      >
+                      {#if match.options.mode === "territory"}<p class="opacity-80">
+                          {m.label_claims({ count: p.claims.toLocaleString(getLocale()) })}
+                        </p>{/if}
+                      <p class="opacity-70">
+                        {m.label_voids_discovered()}: {p.voids.toLocaleString(getLocale())}
+                      </p>
+                    </div>
+                  </div>
+                {/each}
+                <p class="border-t border-slate-600 pt-2">
+                  {m.label_revealed_count({
+                    count: match.cells
+                      .filter((c) => c.revealed && !c.isVoid)
+                      .length.toLocaleString(getLocale()),
+                  })}
+                </p>
+                {#if !match.finished}<p class="opacity-70">
+                    {m.label_match_ends({
+                      time: new Date(match.deadline).toLocaleTimeString(getLocale()),
+                    })}
+                  </p>{/if}
+              </div>
+            {/snippet}
+          </ScoreSummary>
+        {/if}
+        <div class="ml-auto flex gap-2">
+          {#if snapshot?.started && !snapshot.finished && snapshot.turn !== null}
+            <button
+              class="btn btn-secondary"
+              disabled={!canPlay}
+              onclick={() => player && client?.move(player.sequence + 1, { kind: "pass" })}
+              >{m.action_pass()}</button
+            >
+          {/if}
+          <button class="btn btn-error" onclick={leave}>{m.action_exit()}</button>
+        </div>
+      </div>
+      {#if message}
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <p role="status" class="text-amber-300">{message}</p>
+          {#if connectionIssue}
+            <button class="btn btn-secondary" onclick={() => config.account.login()}
+              >{m.action_login_again()}</button
+            >
+            {#if snapshot}<button class="btn btn-secondary" onclick={() => client?.connect()}
+                >{m.action_reconnect()}</button
+              >{/if}
+          {/if}
+        </div>
+      {/if}
     </div>
-    {#if message}<p role="status" class="mt-2 text-amber-300">{message}</p>
-      <button class="btn btn-secondary" onclick={() => config.account.login()}
-        >{m.action_login_again()}</button
-      >{#if snapshot}<button class="btn btn-secondary" onclick={() => client?.connect()}
-          >{m.action_reconnect()}</button
-        >{/if}{/if}
-    {#if !account}
-      <p class="my-3">{m.text_account_multiplayer()}</p>
-      <button class="btn btn-primary" onclick={() => config.account.login()}
-        >{m.action_login()}</button
-      >
-      <button class="btn btn-secondary" onclick={() => config.account.login(true)}
-        >{m.action_register()}</button
-      >
-    {:else if !snapshot}
-      <p>{m.status_connecting()}</p>
-    {:else}
-      {#if snapshot.options.mode === "collaborative"}
-        <p class="mt-2 font-bold">
-          {m.label_team_score({
-            score: snapshot.players
-              .reduce((sum, p) => sum + p.score, 0)
-              .toLocaleString(getLocale()),
-          })} · {m.label_revealed_count({
-            count: snapshot.cells
-              .filter((c) => c.revealed && !c.isVoid)
-              .length.toLocaleString(getLocale()),
-          })}
-        </p>
-      {/if}
-      <div class="mt-2 flex flex-wrap gap-4">
-        {#each snapshot.players as p, i (p.id)}<span style:color={PLAYER_COLORS[i]}
-            >{m.label_player_number({ number: (i + 1).toLocaleString(getLocale()) })}{p.id ===
-            account.id
-              ? m.label_you()
-              : ""}: {m.label_points({ count: p.score.toLocaleString(getLocale()) })}{snapshot
-              .options.mode === "territory"
-              ? ` · ${m.label_claims({ count: p.claims.toLocaleString(getLocale()) })}`
-              : ""}</span
-          >{/each}
-      </div>
-      <p class="mt-2 text-sm select-all">{m.label_match_id({ id: matchId })}</p>
-      <div class="flex flex-wrap items-end gap-2">
-        <label class="grow"
-          >{m.field_invitation_link()}<input
-            id="competitive-invitation"
-            class="input mb-3 w-full input-sm"
-            readonly
-            value={invitationUrl}
-            onclick={(event) => event.currentTarget.select()}
-          /></label
-        >
-        <button class="btn btn-secondary" onclick={copyInvitation}
-          >{copied ? m.action_copied() : m.action_copy_invitation()}</button
-        >
-      </div>
-      {#if !snapshot.started}
-        <p>
-          {m.text_waiting_lobby()}
-        </p>
-        {#if myIndex === 0}<button
-            class="btn btn-primary"
-            disabled={snapshot.players.length < 2}
-            onclick={() => client?.start()}>{m.action_start_match()}</button
-          >{/if}
-      {:else if snapshot.finished && snapshot.options.mode === "collaborative"}
-        <p class="font-bold">
-          {m.status_session_complete()} · {m.label_team_score({
-            score: snapshot.players
-              .reduce((sum, p) => sum + p.score, 0)
-              .toLocaleString(getLocale()),
-          })}
-        </p>
-      {:else if snapshot.finished}
-        {@const best = Math.max(...snapshot.players.map((p) => p.score))}
-        <p class="font-bold">
-          {m.status_match_complete()} — {snapshot.players.filter((p) => p.score === best).length > 1
-            ? m.status_draw()
-            : m.status_winner({
-                number: (snapshot.players.findIndex((p) => p.score === best) + 1).toLocaleString(
-                  getLocale(),
-                ),
-              })}.
-        </p>
-      {:else}
-        <p>
-          {snapshot.turn === null
-            ? snapshot.options.mode === "collaborative"
-              ? m.mode_collaborative_hint()
-              : m.status_realtime_claims()
-            : m.status_player_turn({ number: (snapshot.turn + 1).toLocaleString(getLocale()) })} · {m.label_match_ends(
-            { time: new Date(snapshot.deadline).toLocaleTimeString(getLocale()) },
-          )}
-        </p>
-        {#if snapshot.turn !== null}<button
-            class="btn btn-secondary"
-            disabled={!canPlay}
-            onclick={() => player && client?.move(player.sequence + 1, { kind: "pass" })}
-            >{m.action_pass()}</button
-          >{/if}
-      {/if}
-    {/if}
   </div>
+  {#if !snapshot?.started}
+    <div class="panel-wrapper panel-wrapper-card fixed inset-x-0 z-10 flex justify-center px-3">
+      <div class="panel-shell panel-card w-full max-w-md space-y-4 py-6 text-slate-700">
+        {#if !account}
+          <p>{m.text_account_multiplayer()}</p>
+          <button class="btn btn-primary" onclick={() => config.account.login()}
+            >{m.action_login()}</button
+          >
+          <button class="btn btn-secondary" onclick={() => config.account.login(true)}
+            >{m.action_register()}</button
+          >
+        {:else if !snapshot}<p>{m.status_connecting()}</p>
+        {:else}
+          <p>{m.text_waiting_lobby()}</p>
+          <form
+            class="flex items-end gap-2"
+            onsubmit={(event) => {
+              event.preventDefault();
+              savingName = true;
+              nameSaved = false;
+              void client?.connect();
+            }}
+          >
+            <label class="fieldset min-w-0 flex-1 py-0 text-left">
+              <span class="fieldset-legend">{m.field_player_name()}</span>
+              <input
+                class="input w-full input-sm"
+                type="text"
+                required
+                maxlength="32"
+                bind:value={playerName}
+              />
+            </label>
+            <button
+              class="btn btn-secondary btn-sm"
+              type="submit"
+              disabled={savingName || playerName.trim() === player?.name}
+              >{m.action_save_name()}</button
+            >
+          </form>
+          {#if nameSaved && playerName.trim() === player?.name}<p class="text-sm" role="status">
+              {m.status_name_saved()}
+            </p>{/if}
+          <div class="flex flex-wrap justify-center gap-3">
+            {#each snapshot.players as p, i (p.id)}<span
+                >{displayName(i)}{p.id === account.id ? m.label_you() : ""}</span
+              >{/each}
+          </div>
+          <label class="fieldset text-left">
+            <span class="fieldset-legend">{m.field_invitation_link()}</span>
+            <input
+              id="competitive-invitation"
+              class="input w-full input-sm"
+              readonly
+              value={invitationUrl}
+              onclick={(event) => event.currentTarget.select()}
+            />
+          </label>
+          <div class="flex flex-wrap justify-center gap-2">
+            <button class="btn btn-secondary" onclick={copyInvitation}
+              >{copied ? m.action_copied() : m.action_copy_invitation()}</button
+            >
+            {#if myIndex === 0}<button
+                class="btn btn-primary"
+                disabled={snapshot.players.length < 2}
+                onclick={() => client?.start()}>{m.action_start_match()}</button
+              >{/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
   {#if board && geometry}
-    <div class="min-h-0 w-full flex-1">
+    <div class="game-canvas-container h-full w-full">
       <Canvas
         colorSpace="srgb-linear"
         renderMode="on-demand"

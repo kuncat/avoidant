@@ -13,6 +13,7 @@ interface Saved {
   snapshot: Snapshot;
   map: keyof typeof catalog;
   created: number;
+  cleanupAt?: number;
 }
 interface Attachment {
   actor: string;
@@ -116,6 +117,15 @@ export default {
         if (raw === null) return reply({ error: "Request too large" }, 413);
         const input = JSON.parse(raw);
         if (
+          (input.matchMinutes !== undefined &&
+            (!Number.isInteger(input.matchMinutes) ||
+              input.matchMinutes < 1 ||
+              input.matchMinutes > 1440)) ||
+          (input.turnSeconds !== undefined &&
+            input.turnSeconds !== null &&
+            (!Number.isInteger(input.turnSeconds) ||
+              input.turnSeconds < 1 ||
+              input.turnSeconds > 86400)) ||
           !Object.hasOwn(catalog, input.map) ||
           !["collaborative", "duel", "territory"].includes(input.mode) ||
           typeof input.bordering !== "boolean" ||
@@ -137,10 +147,25 @@ export default {
         );
         if (response.ok) response = reply({ id }, 201);
       } else {
+        const raw = await boundedBody(request, 2048);
+        if (raw === null) return reply({ error: "Request too large" }, 413);
+        const input = raw ? JSON.parse(raw) : {};
+        if (
+          input.name !== undefined &&
+          (typeof input.name !== "string" ||
+            !input.name.trim() ||
+            [...input.name.trim()].length > 32 ||
+            /[\u0000-\u001f\u007f-\u009f]/u.test(input.name))
+        )
+          return reply({ error: "Invalid player name" }, 400);
         response = await env.MATCHES.get(env.MATCHES.idFromName(match![1])).fetch(
           new Request("https://internal/connect", {
             method: "POST",
-            body: JSON.stringify({ actor: account.id, authExpires: account.expiresAt }),
+            body: JSON.stringify({
+              actor: account.id,
+              authExpires: account.expiresAt,
+              name: input.name,
+            }),
           }),
         );
       }
@@ -162,14 +187,22 @@ export class MatchRoom extends DurableObject<Env> {
     });
   }
   private async persist(result: Result) {
-    const saved = { ...this.saved!, state: result.state, snapshot: result.snapshot };
+    const saved = {
+      ...this.saved!,
+      state: result.state,
+      snapshot: result.snapshot,
+      // Reconnects and rejected moves must not postpone finished-room cleanup.
+      cleanupAt: result.snapshot.finished
+        ? (this.saved?.cleanupAt ?? Date.now() + 60_000)
+        : undefined,
+    };
     await this.ctx.storage.put("match", saved);
     this.saved = saved;
     const s = result.snapshot;
     const alarm = s.finished
-      ? Date.now() + 60_000
+      ? saved.cleanupAt!
       : s.started
-        ? Math.min(s.deadline, s.turn === null ? s.deadline : s.turnDeadline)
+        ? Math.min(s.deadline, s.turn === null || !s.turnDeadline ? s.deadline : s.turnDeadline)
         : this.saved.created + 10 * 60_000;
     await this.ctx.storage.setAlarm(alarm);
   }
@@ -215,6 +248,8 @@ export class MatchRoom extends DurableObject<Env> {
           bordering: boolean;
           turnBased: boolean;
           floodLimit: number | null;
+          matchMinutes?: number;
+          turnSeconds?: number | null;
           actor: string;
         };
         const seed = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
@@ -231,6 +266,8 @@ export class MatchRoom extends DurableObject<Env> {
             bordering: input.bordering,
             turnBased: input.turnBased,
             floodLimit: input.floodLimit,
+            matchMinutes: input.matchMinutes ?? 20,
+            turnSeconds: input.turnSeconds === undefined ? 30 : input.turnSeconds,
           },
         });
         this.saved = {
@@ -244,11 +281,12 @@ export class MatchRoom extends DurableObject<Env> {
       }
       if (!this.saved) return json({ error: "Match not found" }, 404);
       if (url.pathname === "/connect") {
-        const { actor, authExpires } = (await request.json()) as {
+        const { actor, authExpires, name } = (await request.json()) as {
           actor: string;
           authExpires: number;
+          name?: string;
         };
-        const result = await rules(this.saved.state, { kind: "join", actor });
+        const result = await rules(this.saved.state, { kind: "join", actor, name });
         if (result.error) return json({ error: result.error }, 409);
         await this.persist(result);
         const ticket = crypto.randomUUID();

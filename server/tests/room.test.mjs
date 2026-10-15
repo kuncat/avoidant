@@ -46,8 +46,8 @@ async function post(mf, path, body, actor = "a") {
     body: JSON.stringify(body),
   });
 }
-async function connect(mf, id, actor) {
-  const res = await post(mf, `/matches/${id}/connect`, {}, actor);
+async function connect(mf, id, actor, name) {
+  const res = await post(mf, `/matches/${id}/connect`, { name }, actor);
   assert.equal(res.status, 200);
   const { ticket } = await res.json();
   const upgrade = await mf.dispatchFetch(
@@ -91,11 +91,18 @@ test("trusted territory lifecycle, redaction, membership, tickets and idempotenc
     });
     assert.equal(created.status, 201);
     const { id } = await created.json();
-    const a = await connect(mf, id, "a");
-    const b = await connect(mf, id, "b");
+    for (const name of ["", " ", "a".repeat(33), "line\nbreak", 42]) {
+      assert.equal((await post(mf, `/matches/${id}/connect`, { name }, "b")).status, 400);
+    }
+    const a = await connect(mf, id, "a", "  আশা  ");
+    const b = await connect(mf, id, "b", "Bela");
     a.ws.send(JSON.stringify({ kind: "start" }));
     const initial = (await a.next((m) => m.type === "snapshot" && m.snapshot.started)).snapshot;
     assert.equal(initial.players.length, 2);
+    assert.deepEqual(
+      initial.players.map((p) => p.name),
+      ["আশা", "Bela"],
+    );
     for (const c of initial.cells.filter((c) => !c.revealed)) {
       assert.equal(c.isVoid, undefined);
       assert.equal(c.count, undefined);
@@ -252,6 +259,47 @@ test("collaborative rooms authenticate teammates and share authoritative state w
         .every((c) => c.isVoid === undefined && c.count === undefined),
     );
     for (const socket of [a, b, c]) socket.ws.close();
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test("host durations are bounded and disabled turn timers retain only match expiry", async () => {
+  const mf = runtime();
+  try {
+    const options = {
+      map: "small",
+      mode: "duel",
+      bordering: false,
+      turnBased: true,
+      floodLimit: 0,
+      matchMinutes: 1440,
+      turnSeconds: null,
+    };
+    for (const patch of [
+      { matchMinutes: 1441 },
+      { matchMinutes: 0 },
+      { matchMinutes: 1.5 },
+      { turnSeconds: 0 },
+      { turnSeconds: 86401 },
+    ]) {
+      assert.equal((await post(mf, "/matches", { ...options, ...patch })).status, 400);
+    }
+    const created = await post(mf, "/matches", options);
+    assert.equal(created.status, 201);
+    const { id } = await created.json();
+    const a = await connect(mf, id, "a", "Asha");
+    const b = await connect(mf, id, "b", "Bela");
+    const before = Date.now();
+    a.ws.send(JSON.stringify({ kind: "start" }));
+    const { snapshot } = await a.next((m) => m.type === "snapshot" && m.snapshot.started);
+    assert.equal(snapshot.options.matchMinutes, 1440);
+    assert.equal(snapshot.options.turnSeconds, null);
+    assert.equal(snapshot.turnDeadline, 0);
+    assert.ok(snapshot.deadline >= before + 86400000);
+    assert.ok(snapshot.deadline <= Date.now() + 86400000);
+    a.ws.close();
+    b.ws.close();
   } finally {
     await mf.dispose();
   }

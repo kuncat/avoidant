@@ -32,17 +32,23 @@ float stripe(float x) {
   return 1.0 - smoothstep(0.1, 0.1 + max(fwidth(x), 0.025), d);
 }
 float territoryPattern(float owner, vec2 p) {
-  if (owner < 1.5) return stripe(p.x + p.y);
-  if (owner < 2.5) return stripe(p.x - p.y);
-  if (owner < 3.5) return max(stripe(p.x + p.y), stripe(p.x - p.y));
-  if (owner < 4.5) {
+  // Each slot uses a different motif, not merely a rotated version of a rival's.
+  if (owner < 1.5) return stripe(p.x + p.y); // Diagonal hatching.
+  if (owner < 2.5) {
+    // Dots.
     float d = length(fract(p) - 0.5);
     return 1.0 - smoothstep(0.14, 0.23, d);
   }
-  if (owner < 5.5) return stripe(p.y) * step(0.35, fract(p.x * 0.5));
-  if (owner < 6.5) return stripe(p.y + abs(fract(p.x * 0.5) - 0.5) * 2.0);
-  if (owner < 7.5) return max(stripe(p.x), stripe(p.y));
-  return stripe(p.y + sin(p.x * 3.14159) * 0.3);
+  if (owner < 3.5) return max(stripe(p.x + p.y), stripe(p.x - p.y)); // Cross-hatching.
+  if (owner < 4.5) return stripe(p.y) * step(0.35, fract(p.x * 0.5)); // Dashes.
+  if (owner < 5.5) return stripe(p.y + abs(fract(p.x * 0.5) - 0.5) * 2.0); // Zigzags.
+  if (owner < 6.5) return max(stripe(p.x), stripe(p.y)); // Square grid.
+  if (owner < 7.5) {
+    // Rings.
+    float d = abs(length(fract(p) - 0.5) - 0.3);
+    return 1.0 - smoothstep(0.035, 0.11, d);
+  }
+  return stripe(p.y + sin(p.x * 3.14159) * 0.3); // Waves.
 }
 
 void main() {

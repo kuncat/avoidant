@@ -6,8 +6,12 @@ use std::collections::VecDeque;
 use wasm_bindgen::prelude::*;
 
 pub const VERSION: u32 = 1;
-const TURN_MS: u64 = 30_000;
-const MATCH_MS: u64 = 20 * 60_000;
+fn default_match_minutes() -> u64 {
+    20
+}
+fn default_turn_seconds() -> Option<u64> {
+    Some(30)
+}
 const COOLDOWN_MS: u64 = 400;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
@@ -26,12 +30,18 @@ pub struct Options {
     /// Additional reveals, excluding the selected cell. None means unlimited.
     pub flood_limit: Option<usize>,
     pub turn_based: bool,
+    #[serde(default = "default_match_minutes")]
+    pub match_minutes: u64,
+    #[serde(default = "default_turn_seconds")]
+    pub turn_seconds: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Player {
     pub id: String,
+    #[serde(default)]
+    pub name: String,
     pub score: i32,
     pub claims: u32,
     pub voids: u32,
@@ -117,6 +127,13 @@ impl Match {
                 return Err("Invalid adjacency".into());
             }
         }
+        if !(1..=1440).contains(&options.match_minutes)
+            || options
+                .turn_seconds
+                .is_some_and(|s| !(1..=86400).contains(&s))
+        {
+            return Err("Invalid match or turn duration".into());
+        }
         if options.flood_limit.is_some_and(|v| v > 4096) {
             return Err("Flood limit exceeds board maximum".into());
         }
@@ -172,6 +189,7 @@ impl Match {
         }
         self.players.push(Player {
             id,
+            name: String::new(),
             score: 0,
             claims: 0,
             voids: 0,
@@ -182,16 +200,40 @@ impl Match {
         Ok(())
     }
 
+    fn join_named(&mut self, id: String, name: Option<String>) -> Result<(), String> {
+        let name = name.map(|n| n.trim().to_string());
+        if let Some(n) = &name {
+            if n.is_empty() || n.chars().count() > 32 || n.chars().any(|c| c.is_control()) {
+                return Err("Invalid player name".into());
+            }
+        }
+        let existing = self.players.iter().any(|p| p.id == id);
+        self.join(id.clone())?;
+        // Names remain stable during play, including when a socket reconnects.
+        if (!existing || !self.started)
+            && let Some(name) = name
+        {
+            let player = self.players.iter_mut().find(|p| p.id == id).unwrap();
+            if player.name != name {
+                player.name = name;
+                self.revision += 1;
+            }
+        }
+        Ok(())
+    }
+
     pub fn start(&mut self, actor: &str, now: u64) -> Result<(), String> {
         if self.players[0].id != actor || self.started || self.players.len() < 2 {
             return Err("Cannot start match".into());
         }
         self.started = true;
-        self.deadline = now + MATCH_MS;
-        self.turn_deadline = now + TURN_MS;
+        self.deadline = now + self.options.match_minutes * 60_000;
+        self.turn_deadline = self.options.turn_seconds.map_or(0, |s| now + s * 1000);
         // Spread starts by graph distance; no claim of equal terrain difficulty.
         let mut starts: Vec<usize> = vec![];
-        let count = if self.options.mode != Mode::Territory {
+        let count = if !self.options.bordering {
+            0
+        } else if self.options.mode != Mode::Territory {
             1
         } else {
             self.players.len()
@@ -236,12 +278,16 @@ impl Match {
             self.revision += 1;
             return;
         }
-        if self.options.turn_based && now >= self.turn_deadline {
+        if self.options.turn_based
+            && let Some(seconds) = self.options.turn_seconds
+            && now >= self.turn_deadline
+        {
+            let turn_ms = seconds * 1000;
             // Each missed turn is a pass. Entire abandoned matches finish promptly.
-            let skipped = ((now - self.turn_deadline) / TURN_MS + 1) as usize;
+            let skipped = ((now - self.turn_deadline) / turn_ms + 1) as usize;
             self.passes += skipped;
             self.turn = (self.turn + skipped) % self.players.len();
-            self.turn_deadline += skipped as u64 * TURN_MS;
+            self.turn_deadline += skipped as u64 * turn_ms;
             self.finished = self.passes >= self.players.len();
             self.revision += 1;
         }
@@ -321,7 +367,7 @@ impl Match {
         self.players[p].sequence = sequence;
         self.players[p].last_action = Some(now);
         self.turn = (self.turn + 1) % self.players.len();
-        self.turn_deadline = now + TURN_MS;
+        self.turn_deadline = self.options.turn_seconds.map_or(0, |s| now + s * 1000);
         self.finished = self.passes >= self.players.len()
             || (0..self.voids.len()).all(|i| {
                 self.voids[i]
@@ -412,6 +458,7 @@ enum Command {
     },
     Join {
         actor: String,
+        name: Option<String>,
     },
     Start {
         actor: String,
@@ -462,7 +509,7 @@ fn run(state: &str, command: &str) -> Result<String, String> {
                 return Err("Incompatible saved match".into());
             }
             let result = match c {
-                Command::Join { actor } => g.join(actor),
+                Command::Join { actor, name } => g.join_named(actor, name),
                 Command::Start { actor, now } => g.start(&actor, now),
                 Command::Move {
                     actor,
@@ -489,6 +536,60 @@ fn run(state: &str, command: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn player_names_are_validated_persisted_and_stable_during_play() {
+        let mut g = game(Some(0), false);
+        g.started = false;
+        g.join_named("a".into(), Some("  আশা  ".into())).unwrap();
+        assert_eq!(g.snapshot().players[0].name, "আশা");
+        for invalid in [
+            "".to_string(),
+            " ".to_string(),
+            "a".repeat(33),
+            "a\nb".into(),
+        ] {
+            assert!(g.join_named("c".into(), Some(invalid)).is_err());
+        }
+        assert_eq!(g.players.len(), 2);
+        let state = serde_json::to_string(&g).unwrap();
+        let mut restored: Match = serde_json::from_str(&state).unwrap();
+        restored.started = true;
+        restored
+            .join_named("a".into(), Some("Changed".into()))
+            .unwrap();
+        assert_eq!(restored.snapshot().players[0].name, "আশা");
+        restored.options.mode = Mode::Collaborative;
+        restored
+            .join_named("c".into(), Some("New player".into()))
+            .unwrap();
+        assert_eq!(restored.players[2].name, "New player");
+    }
+
+    #[test]
+    fn configured_deadlines_and_disabled_turn_timer() {
+        let mut g = game(Some(0), true);
+        g.started = false;
+        g.options.match_minutes = 1440;
+        g.options.turn_seconds = Some(90);
+        g.start("a", 1000).unwrap();
+        assert_eq!(g.deadline, 1000 + 86_400_000);
+        assert_eq!(g.turn_deadline, 91_000);
+        g.tick(90_999);
+        assert_eq!(g.turn, 0);
+        g.tick(91_000);
+        assert_eq!(g.turn, 1);
+        g.started = false;
+        g.options.turn_seconds = None;
+        g.start("a", 1000).unwrap();
+        let turn = g.turn;
+        g.tick(1_000_000);
+        assert_eq!(g.turn, turn);
+        assert_eq!(g.turn_deadline, 0);
+        assert!(!g.finished);
+        g.tick(g.deadline);
+        assert!(g.finished);
+    }
+
     fn game(limit: Option<usize>, turns: bool) -> Match {
         let n = 32;
         let graph = (0..n).map(|i| vec![(i + n - 1) % n, (i + 1) % n]).collect();
@@ -497,6 +598,8 @@ mod tests {
             0.1,
             [42; 32],
             Options {
+                match_minutes: 20,
+                turn_seconds: Some(30),
                 mode: Mode::Territory,
                 bordering: false,
                 flood_limit: limit,
@@ -509,6 +612,27 @@ mod tests {
         g.start("a", 1000).unwrap();
         g
     }
+    #[test]
+    fn starts_are_only_revealed_when_bordering_is_enabled() {
+        let g = game(Some(0), false);
+        assert!(g.revealed.iter().all(|v| !v));
+        assert!(g.owners.iter().all(Option::is_none));
+        assert!(g.players.iter().all(|p| p.score == 0 && p.claims == 0));
+        let mut bordered = g.clone();
+        bordered.started = false;
+        bordered.options.bordering = true;
+        bordered.start("a", 1000).unwrap();
+        assert_eq!(bordered.revealed.iter().filter(|v| **v).count(), 2);
+        assert!(bordered.players.iter().all(|p| p.claims == 1));
+        for mode in [Mode::Collaborative, Mode::Duel] {
+            let mut shared = g.clone();
+            shared.started = false;
+            shared.options.mode = mode;
+            shared.start("a", 1000).unwrap();
+            assert!(shared.revealed.iter().all(|v| !v));
+        }
+    }
+
     #[test]
     fn hidden_cells_never_include_clues_or_voids() {
         let g = game(None, false);
@@ -531,8 +655,8 @@ mod tests {
             let before = g.revealed.iter().filter(|&&v| v).count();
             g.act("a", 1, Action::Select { cell }, 2000).unwrap();
             let revealed = g.revealed.iter().filter(|&&v| v).count() - before;
-            assert_eq!(g.players[0].claims, 2);
-            assert_eq!(g.owners.iter().filter(|o| **o == Some(0)).count(), 2);
+            assert_eq!(g.players[0].claims, 1);
+            assert_eq!(g.owners.iter().filter(|o| **o == Some(0)).count(), 1);
             if let Some(limit) = limit {
                 assert!(revealed <= 1 + limit);
             }
@@ -583,6 +707,8 @@ mod tests {
             0.1,
             [7; 32],
             Options {
+                match_minutes: 20,
+                turn_seconds: Some(30),
                 mode: Mode::Collaborative,
                 bordering: true,
                 flood_limit: Some(0),

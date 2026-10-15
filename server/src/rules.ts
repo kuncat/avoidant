@@ -23,7 +23,16 @@ export interface Snapshot {
     bordering: boolean;
     floodLimit: number | null;
     turnBased: boolean;
+    matchMinutes?: number;
+    turnSeconds?: number | null;
   };
-  players: { id: string; score: number; claims: number; voids: number; sequence: number }[];
+  players: {
+    id: string;
+    name?: string;
+    score: number;
+    claims: number;
+    voids: number;
+    sequence: number;
+  }[];
   cells: { revealed: boolean; isVoid?: boolean; count?: number; owner: number | null }[];
 }

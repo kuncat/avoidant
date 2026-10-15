@@ -42,19 +42,28 @@ try {
     territory: "Territory Claim the board",
   };
   await a.getByRole("button", { name: modeLabels[mode], exact: true }).click();
+  assert.equal(await a.getByLabel("Player Name", { exact: true }).inputValue(), "a");
+  await a.getByLabel("Player Name", { exact: true }).fill("Asha");
+  const duration = a.getByLabel("Match duration", { exact: true });
+  await a.getByLabel("Duration unit").selectOption("hours");
+  assert.equal(await duration.getAttribute("max"), "24");
+  await duration.fill("24");
+  await a.getByLabel("Duration unit").selectOption("minutes");
+  assert.equal(await duration.getAttribute("max"), "1440");
+  assert.equal(await duration.inputValue(), "1440");
   const mapNames = {
     flat: "Flat",
-    icosahedron: "Icosahedron (20 faces)",
-    cube: "Cube (6 faces)",
-    tetrahedron: "Tetrahedron (4 faces)",
-    octahedron: "Octahedron (8 faces)",
-    dodecahedron: "Dodecahedron (12 faces)",
+    icosahedron: "Icosahedron",
+    cube: "Cube",
+    tetrahedron: "Tetrahedron",
+    octahedron: "Octahedron",
+    dodecahedron: "Dodecahedron",
     spheroid: "Spheroid",
     geodesicIcosphere: "Geodesic icosphere",
   };
   const maps = a.getByRole("group", { name: "Map", exact: true });
   assert.equal(await maps.getByRole("button").count(), 8);
-  await maps.getByRole("button", { name: "Cube (6 faces)", exact: true }).click();
+  await maps.getByRole("button", { name: "Cube", exact: true }).click();
   await maps
     .getByRole("button", {
       name: mapNames[process.env.TEST_MAP_SHAPE ?? "icosahedron"],
@@ -118,10 +127,34 @@ try {
   await b.getByRole("button", { name: "New Game", exact: true }).waitFor();
   await b.goto(invitation);
   await b.getByText("Waiting in lobby.", { exact: false }).waitFor();
+  await b.getByLabel("Player Name", { exact: true }).fill("Bela");
+  await b.getByRole("button", { name: "Save name", exact: true }).click();
+  await b.getByText("Name saved", { exact: true }).waitFor();
+  const alignment = await b
+    .getByRole("button", { name: "Save name", exact: true })
+    .evaluate((button) => {
+      const input = button.form.querySelector("input").getBoundingClientRect();
+      return Math.abs(button.getBoundingClientRect().bottom - input.bottom);
+    });
+  assert.ok(alignment <= 1);
+  await a.getByText("Bela", { exact: true }).waitFor();
   await a.getByRole("button", { name: "Start match", exact: true }).click();
-  const startedText = mode === "collaborative" ? "Explore together" : "P1's turn";
+  const startedText = mode === "collaborative" ? "Explore together" : "Asha's turn";
   await a.getByText(startedText, { exact: false }).waitFor();
   await b.getByText(startedText, { exact: false }).waitFor();
+  assert.equal(await a.getByLabel("Invitation link", { exact: true }).count(), 0);
+  assert.equal(await a.getByText("Match ID:", { exact: false }).count(), 0);
+  assert.equal(await a.getByRole("heading", { name: "Avoidant", exact: true }).count(), 1);
+  const score = a.getByRole("group", { name: "Score summary" }).getByRole("button");
+  await score.click();
+  await a.getByText("Asha (you)", { exact: true }).waitFor();
+  await a.getByText("Bela", { exact: true }).waitFor();
+  await a.getByRole("heading", { name: "Avoidant", exact: true }).click();
+  assert.equal(await score.getAttribute("aria-expanded"), "true");
+  await score.click();
+
+  assert.equal(await score.getAttribute("aria-expanded"), "false");
+
   const initialTeam =
     mode === "collaborative" ? await b.getByText("Team score:").textContent() : null;
   await a.locator("canvas").waitFor();
@@ -141,7 +174,7 @@ try {
         )
           await b.waitForTimeout(100);
         assert.notEqual(await b.getByText("Team score:").textContent(), initialTeam);
-      } else await b.getByText("P2's turn", { exact: false }).waitFor({ timeout: 1500 });
+      } else await b.getByText("Bela's turn", { exact: false }).waitFor({ timeout: 1500 });
       moved = true;
       break;
     } catch {
@@ -153,7 +186,7 @@ try {
   await a.screenshot({ path: `${scratch}/territory.png` });
   if (mode !== "collaborative") {
     await b.getByRole("button", { name: "Pass", exact: true }).click();
-    await a.getByText("P1's turn", { exact: false }).waitFor();
+    await a.getByText("Asha's turn", { exact: false }).waitFor();
     // Player A's preceding terrain action is subject to the 400 ms server cooldown.
     await a.waitForTimeout(450);
     await a.getByRole("button", { name: "Pass", exact: true }).click();
@@ -190,12 +223,14 @@ try {
   );
   await localized.waitForTimeout(400);
   assert.ok(await localized.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  const alignment = await localized.getByLabel("পালা করে খেলা", { exact: true }).evaluate((el) => {
-    const control = el.getBoundingClientRect();
-    const text = el.previousElementSibling.getBoundingClientRect();
-    return Math.abs((control.top + control.bottom) / 2 - (text.top + text.bottom) / 2);
-  });
-  assert.ok(alignment <= 1, `Checkbox and label centers differ by ${alignment}px`);
+  const checkboxAlignment = await localized
+    .getByLabel("পালা করে খেলা", { exact: true })
+    .evaluate((el) => {
+      const control = el.getBoundingClientRect();
+      const text = el.previousElementSibling.getBoundingClientRect();
+      return Math.abs((control.top + control.bottom) / 2 - (text.top + text.bottom) / 2);
+    });
+  assert.ok(checkboxAlignment <= 1, `Checkbox and label centers differ by ${checkboxAlignment}px`);
   await localized.screenshot({ path: `${scratch}/bengali-setup.png`, animations: "disabled" });
   await localized
     .getByRole("button", { name: "সহযোগিতামূলক একসঙ্গে অনুসন্ধান করুন", exact: true })
@@ -204,6 +239,17 @@ try {
   await localized.getByRole("button", { name: "শুরু করুন", exact: true }).click();
   await localized.getByText("খেলা শুরুর অপেক্ষায়।", { exact: false }).waitFor();
   assert.ok(await localized.getByLabel("আমন্ত্রণ লিঙ্ক", { exact: true }).inputValue());
+  const solo = await context.newPage();
+  await solo.goto(`${harness.url}?actor=a`);
+  await solo.getByRole("button", { name: "নতুন গেম", exact: true }).click();
+  await solo.getByRole("button", { name: "শুরু করুন", exact: true }).click();
+  const soloScore = solo.getByRole("group", { name: "স্কোরের সারাংশ" }).getByRole("button");
+  await soloScore.waitFor();
+  await soloScore.focus();
+  await soloScore.press("Enter");
+  assert.equal(await soloScore.getAttribute("aria-expanded"), "true");
+  await soloScore.press("Escape");
+  assert.equal(await soloScore.getAttribute("aria-expanded"), "false");
   assert.deepEqual(errors, [], harness.logs());
   console.log(
     `${mode}: shared menu, invitation, authoritative terrain click, login gating and gameplay passed. Screenshot: ${scratch}/territory.png`,

@@ -110,12 +110,12 @@ verified Kuncat accounts; true requires `avoidant:competitive` from PostgreSQL.
 Billing/checkout is not implemented.
 
 Current bounds: 2 players for duel, 2–8 for territory, 16 sockets per room, 60 lobby
-requests/account/hour, 10 messages/socket/second, 400 ms action cooldown, 30-second
-turns, 20-minute matches, 10-minute unstarted-lobby expiry, one-minute completed
+requests/account/hour, 10 messages/socket/second, 400 ms action cooldown, host-configured
+turns (1–86400 seconds or disabled; default 30), matches (1–1440 minutes from start; default 20), 10-minute unstarted-lobby expiry, one-minute completed
 match retention. Persisted rules version is checked on every transition. Login
 expiry is enforced on moves; reconnect obtains fresh verified authorization.
 
-Potential production follow-ups: fair-start evaluation, configurable durations,
+Potential production follow-ups: fair-start evaluation,
 rankings/results retention, graceful account deletion, telemetry/alerts, broader
 localization, and multi-region latency playtesting. These are distinct from the
 implemented game-state authority. Durable Objects scale across matches; one match
@@ -126,3 +126,5 @@ lobby join, 3D rendering, turns and completion. Install the root npm dependencie
 and a Playwright browser first (or set PLAYWRIGHT_CHROMIUM_EXECUTABLE to an existing
 Chrome executable). This test follows the regular menu and invitation flow using dev-only account configuration.
 The root Cargo.lock is now tracked because server releases need locked Rust builds.
+
+Player names reuse the browser’s `avoidant:playerName` preference and default to the signed-in profile username when no custom name is saved. The authoritative lobby validates and broadcasts names; names stay fixed during play. Restart the local multiplayer launcher after server/rules changes so its bundled Worker includes the latest protocol.

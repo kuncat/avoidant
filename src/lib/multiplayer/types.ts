@@ -19,7 +19,7 @@ export interface CompetitiveConfig {
     logout(): Promise<void>;
     completeLogin(): Promise<void>;
     token(): Promise<string>;
-    account(): Promise<{ id: string; capabilities: string[] } | null>;
+    account(): Promise<{ id: string; username?: string; capabilities: string[] } | null>;
   };
 }
 export interface MatchSnapshot {
@@ -35,8 +35,17 @@ export interface MatchSnapshot {
     bordering: boolean;
     floodLimit: number | null;
     turnBased: boolean;
+    matchMinutes?: number;
+    turnSeconds?: number | null;
   };
-  players: { id: string; score: number; claims: number; voids: number; sequence: number }[];
+  players: {
+    id: string;
+    name?: string;
+    score: number;
+    claims: number;
+    voids: number;
+    sequence: number;
+  }[];
   cells: { revealed: boolean; isVoid?: boolean; count?: number; owner: number | null }[];
 }
 export const PLAYER_COLORS = [
@@ -56,4 +65,6 @@ export interface MultiplayerSetup {
   bordering: boolean;
   turnBased: boolean;
   floodLimit: number | null;
+  matchMinutes?: number;
+  turnSeconds?: number | null;
 }
