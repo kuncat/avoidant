@@ -182,7 +182,6 @@
   "error_player_name": "Enter a player name of 1–32 characters.",
   "field_match_minutes": "Match duration (minutes, up to 24 hours)",
   "field_turn_timer": "Turn timer",
-  "field_turn_seconds": "Seconds per turn",
   "status_name_saved": "Name saved",
   "error_name_server_update": "This game server needs an update to support player names. Restart the local multiplayer server.",
   "error_name_not_saved": "The server did not save your name. Update the game server and try again.",
@@ -198,7 +197,6 @@
   "help_bordering": "Claims must touch your existing territory. Players receive a starting cell when enabled; otherwise the board starts unexplored.",
   "help_turn_based": "Players act one at a time. When off, everyone can explore and claim cells simultaneously.",
   "help_turn_timer": "Automatically pass a player’s turn when time runs out. Turning this off does not disable the match duration limit.",
-  "help_turn_seconds": "Seconds allowed for each turn. The server enforces the countdown, including while a player is disconnected.",
   "help_flood_limit": "Maximum additional cells revealed by a flood, excluding the clicked cell. ∞ allows unlimited reveals. Floods do not claim extra territory.",
   "help_map": "Choose the board’s surface. Flat maps are planar; the other shapes can be rotated to explore every side.",
   "help_map_size": "Choose the number of cells. Larger maps take longer to explore. Custom sizes are available in solo mode.",
@@ -235,5 +233,19 @@
     }
   ],
   "action_download_replay": "Download replay",
-  "error_replay": "Could not download the replay. Try again."
+  "error_replay": "Could not download the replay. Try again.",
+  "field_turn_duration": "Turn duration",
+  "field_turn_duration_unit": "Turn duration unit",
+  "help_turn_duration": "Time allowed for each turn. The server enforces the countdown, including while a player is disconnected.",
+  "unit_seconds": "Seconds",
+  "unit_seconds_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Second",
+        "countPlural=other": "Seconds"
+      }
+    }
+  ]
 }

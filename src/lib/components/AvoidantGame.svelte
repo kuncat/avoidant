@@ -74,7 +74,8 @@
   let infiniteFlood = $state(true);
   let matchDuration = $state(60);
   let matchUnit = $state<"minutes" | "hours">("minutes");
-  let turnSeconds = $state(5);
+  let turnDuration = $state(5);
+  let turnUnit = $state<"seconds" | "minutes">("seconds");
   let turnTimer = $state(true);
   let floodLimit = $state(0);
   const playModes = [
@@ -443,7 +444,7 @@
         turnBased: playMode === "territory" && turnBased,
         floodLimit: infiniteFlood ? null : floodLimit,
         matchMinutes: matchDuration * (matchUnit === "hours" ? 60 : 1),
-        turnSeconds: turnTimer ? turnSeconds : null,
+        turnSeconds: turnTimer ? turnDuration * (turnUnit === "minutes" ? 60 : 1) : null,
       };
       invitation = undefined;
       competitiveOpen = true;
@@ -753,9 +754,9 @@
                       aria-label={m.field_match_duration()}
                       bind:value={matchDuration}
                     />
-                    <div class="relative join-item w-24 shrink-0">
+                    <div class="relative join-item w-24 shrink-0 border-0">
                       <select
-                        class="select w-full text-transparent select-sm [&>option]:text-base-content"
+                        class="duration-unit-select select w-full rounded-l-none select-sm"
                         aria-label={m.field_duration_unit()}
                         value={matchUnit}
                         onchange={(event) => {
@@ -863,25 +864,65 @@
                         bind:checked={turnTimer}
                       /></label
                     >
-                    {#if turnTimer}<label
-                        class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                    {#if turnTimer}
+                      <div
+                        class="flex w-full items-center justify-between gap-4"
                         transition:slide={{ duration: 180 }}
-                        ><span
-                          ><OptionHelp
-                            label={m.field_turn_seconds()}
-                            help={m.help_turn_seconds()}
-                          /></span
-                        ><input
-                          class="input w-30 text-right input-sm"
-                          type="number"
-                          min="1"
-                          max="86400"
-                          step="1"
-                          required
-                          aria-label={m.field_turn_seconds()}
-                          bind:value={turnSeconds}
-                        /></label
-                      >{/if}
+                      >
+                        <label
+                          class="label text-left whitespace-normal text-base-content"
+                          for="turn-duration"
+                        >
+                          <OptionHelp
+                            label={m.field_turn_duration()}
+                            help={m.help_turn_duration()}
+                          />
+                        </label>
+                        <div class="join w-36 shrink-0">
+                          <input
+                            id="turn-duration"
+                            class="input join-item min-w-0 flex-1 text-right input-sm"
+                            type="number"
+                            min="1"
+                            max={turnUnit === "minutes" ? 1440 : 86400}
+                            step="1"
+                            required
+                            aria-label={m.field_turn_duration()}
+                            bind:value={turnDuration}
+                          />
+                          <div class="relative join-item w-24 shrink-0 border-0">
+                            <select
+                              class="duration-unit-select select w-full rounded-l-none select-sm"
+                              aria-label={m.field_turn_duration_unit()}
+                              value={turnUnit}
+                              onchange={(event) => {
+                                const unit = event.currentTarget.value as "seconds" | "minutes";
+                                const seconds = turnDuration * (turnUnit === "minutes" ? 60 : 1);
+                                turnDuration = Math.min(
+                                  unit === "minutes" ? 1440 : 86400,
+                                  Math.max(
+                                    1,
+                                    Math.ceil(unit === "minutes" ? seconds / 60 : seconds),
+                                  ),
+                                );
+                                turnUnit = unit;
+                              }}
+                            >
+                              <option value="seconds">{m.unit_seconds()}</option>
+                              <option value="minutes">{m.unit_minutes()}</option>
+                            </select>
+                            <span
+                              aria-hidden="true"
+                              class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-base-content"
+                            >
+                              {turnUnit === "minutes"
+                                ? m.unit_minutes_selected({ count: turnDuration ?? 0 })
+                                : m.unit_seconds_selected({ count: turnDuration ?? 0 })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    {/if}
                   </div>
                 {/if}
                 <div class="form-control flex w-full flex-row items-center justify-between gap-4">
@@ -1285,3 +1326,22 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .duration-unit-select {
+    /* Hide only the native selected text; DaisyUI's arrow uses currentColor. */
+    text-indent: -9999px;
+    color: var(--color-base-content);
+    outline: none;
+  }
+
+  .duration-unit-select:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  .duration-unit-select option,
+  .duration-unit-select::picker(select) {
+    text-indent: 0;
+  }
+</style>

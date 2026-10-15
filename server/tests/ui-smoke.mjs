@@ -96,7 +96,7 @@ try {
     await a.getByLabel("Claims must border existing territory", { exact: true }).uncheck();
     await a.getByLabel("Turn-based", { exact: true }).check();
   }
-  if (mode !== "collaborative") await a.getByLabel("Seconds per turn", { exact: true }).fill("300");
+  if (mode !== "collaborative") await a.getByLabel("Turn duration", { exact: true }).fill("300");
   await a.getByLabel("Additional flood cells", { exact: true }).click();
   await a.getByLabel("Additional flood cells", { exact: true }).fill("3");
   await a.getByRole("button", { name: "Infinite flood", exact: true }).click();
