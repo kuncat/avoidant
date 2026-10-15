@@ -1,6 +1,5 @@
 mod game_api;
 mod game_network;
-mod listener;
 mod mapgen;
 mod mutation;
 mod score;
@@ -9,22 +8,16 @@ mod sync_bridge;
 mod ui_state;
 mod utils;
 
-use std::{
-    cell::RefCell,
-    collections::{BTreeSet, HashMap},
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
 use js_sys::Array;
+pub use mapgen::MapShape;
+pub use score::ScoreState;
 use serde::{Deserialize, Serialize};
 use svelte_store::Readable;
 use tsify::Tsify;
-use wasm_bindgen::prelude::*;
-mod net;
-pub use mapgen::MapShape;
-use net::NetworkNode;
-pub use score::ScoreState;
 pub use ui_state::UiState;
+use wasm_bindgen::prelude::*;
 
 mod shared_constants;
 pub use shared_constants::{PULSE_MIN_DURATION_MS, PULSE_SWEEP_BAND, PULSE_SWEEP_VELOCITY};
@@ -62,49 +55,11 @@ pub struct CellMetadataEntry {
     is_revealing: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize, Tsify)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkPeerStatus {
-    endpoint_id: String,
-    #[tsify(optional)]
-    nickname: Option<String>,
-    #[tsify(optional)]
-    last_seen_ms: Option<f64>,
-    is_connected: bool,
-}
-
-#[derive(Clone, Serialize, Deserialize, Tsify)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkSnapshot {
-    pub(crate) has_node: bool,
-    pub(crate) listener_started: bool,
-    #[tsify(optional)]
-    pub(crate) endpoint_id: Option<String>,
-    #[tsify(optional)]
-    pub(crate) topic_id: Option<String>,
-    pub(crate) peers: Vec<NetworkPeerStatus>,
-    #[tsify(optional)]
-    pub(crate) last_inbound_mutation_ms: Option<f64>,
-    #[tsify(optional)]
-    pub(crate) last_outbound_mutation_ms: Option<f64>,
-    pub(crate) sampled_at_ms: f64,
-}
-
-#[derive(Default, Clone)]
-pub(crate) struct PeerPresenceEntry {
-    pub(crate) nickname: Option<String>,
-    pub(crate) last_seen_ms: Option<f64>,
-}
-
 #[derive(Serialize, Deserialize, Tsify)]
 #[serde(rename_all = "camelCase")]
 pub struct GameOptions {
     num_cells: u64,
     rng_seed: u64,
-    #[tsify(optional)]
-    #[serde(default)]
-    /** Iroh relay server URLs to use for peer discovery and transport. */
-    relay_urls: Option<Vec<String>>,
     #[tsify(optional)]
     /** Map surface shape. Defaults to Icosahedron { radius: 50.0 }. */
     shape: Option<MapShape>,
@@ -257,18 +212,8 @@ pub struct GameState {
     cells: Rc<RefCell<Readable<Array>>>,
     cell_metadata: Rc<RefCell<Readable<Array>>>,
     score: Rc<RefCell<Readable<ScoreState>>>,
-    network_snapshot: Rc<RefCell<Readable<NetworkSnapshot>>>,
-    connected_endpoints: Rc<RefCell<BTreeSet<String>>>,
-    peer_presence: Rc<RefCell<HashMap<String, PeerPresenceEntry>>>,
-    last_inbound_mutation_ms: Rc<RefCell<Option<f64>>>,
-    last_outbound_mutation_ms: Rc<RefCell<Option<f64>>>,
     ui_state: UiState,
     rng_seed: u64,
-    network_node: Option<NetworkNode>,
-    network_channel: Option<net::Channel>,
-    network_listener_started: bool,
-    game_options_json: String,
-    relay_urls: Vec<String>,
     elevation_min: f64,
     elevation_max: f64,
     void_fraction: f64,
@@ -285,9 +230,6 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "Readable<ScoreState>")]
     pub type Score;
-
-    #[wasm_bindgen(typescript_type = "Readable<NetworkSnapshot>")]
-    pub type NetworkSnapshotStore;
 
     #[wasm_bindgen(typescript_type = "Readable<Array<Pulse>>")]
     pub type Pulses;
@@ -331,37 +273,6 @@ impl CellMetadataEntry {
 
     pub(crate) fn set_revealing(&mut self, value: bool) {
         self.is_revealing = value;
-    }
-}
-
-impl NetworkPeerStatus {
-    pub(crate) fn new(
-        endpoint_id: String,
-        nickname: Option<String>,
-        last_seen_ms: Option<f64>,
-        is_connected: bool,
-    ) -> Self {
-        Self {
-            endpoint_id,
-            nickname,
-            last_seen_ms,
-            is_connected,
-        }
-    }
-}
-
-impl NetworkSnapshot {
-    pub(crate) fn empty() -> Self {
-        Self {
-            has_node: false,
-            listener_started: false,
-            endpoint_id: None,
-            topic_id: None,
-            peers: Vec::new(),
-            last_inbound_mutation_ms: None,
-            last_outbound_mutation_ms: None,
-            sampled_at_ms: js_sys::Date::now(),
-        }
     }
 }
 

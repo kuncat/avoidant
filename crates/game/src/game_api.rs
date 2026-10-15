@@ -1,21 +1,19 @@
-use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-use js_sys::{Array, JSON};
+use js_sys::Array;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use svelte_store::Readable;
-use tsify::{Ts, Tsify};
+use tsify::Ts;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
 use crate::mutation::{Mutation, MutationOrigin};
-use crate::net::TicketOpts;
 use crate::score::ScoreState;
 use crate::{
-    CellMetadata, CellMetadataEntry, GameOptions, GameState, MapCell, MapCells, NetworkNode,
-    NetworkPeerStatus, NetworkSnapshot, NetworkSnapshotStore, Score, UiState, utils,
+    CellMetadata, CellMetadataEntry, GameOptions, GameState, MapCell, MapCells, Score, UiState,
+    utils,
 };
-use networking::GameTicket;
 
 #[wasm_bindgen]
 impl GameState {
@@ -26,20 +24,12 @@ impl GameState {
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         utils::set_panic_hook();
 
-        let options_value = serde_wasm_bindgen::to_value(&options)?;
-        let options_json = JSON::stringify(&options_value)?
-            .as_string()
-            .ok_or_else(|| JsValue::from_str("Failed to serialize game options"))?;
-        let relay_urls = options.relay_urls.clone().unwrap_or_default();
         let elevation_min = options.elevation_min.unwrap_or(-0.4);
         let elevation_max = options.elevation_max.unwrap_or(0.4);
         let void_fraction = options.void_fraction.unwrap_or(0.15625).clamp(0.0, 1.0);
-        let initial_network_snapshot = NetworkSnapshot::empty();
 
         Ok(GameState {
-            session: Rc::new(RefCell::new(crate::sync::Session::new(
-                options.authority.clone(),
-            ))),
+            session: Rc::new(RefCell::new(crate::sync::Session::new(None))),
             cells: Rc::new(RefCell::new(Readable::new(Array::new()))),
             cell_metadata: Rc::new(RefCell::new(Readable::new(Array::new()))),
             score: Rc::new(RefCell::new(Readable::new_mapped(
@@ -49,28 +39,12 @@ impl GameState {
                         .expect("score state serialization should not fail")
                 },
             ))),
-            network_snapshot: Rc::new(RefCell::new(Readable::new_mapped(
-                initial_network_snapshot,
-                |snapshot| {
-                    serde_wasm_bindgen::to_value(snapshot)
-                        .expect("network snapshot serialization should not fail")
-                },
-            ))),
-            connected_endpoints: Rc::new(RefCell::new(BTreeSet::new())),
-            peer_presence: Rc::new(RefCell::new(Default::default())),
-            last_inbound_mutation_ms: Rc::new(RefCell::new(None)),
-            last_outbound_mutation_ms: Rc::new(RefCell::new(None)),
             ui_state: UiState::new(),
             rng_seed: options.rng_seed,
             elevation_min,
             elevation_max,
             void_fraction,
             first_safe_cell: std::cell::Cell::new(options.first_safe_cell),
-            network_node: None,
-            network_channel: None,
-            network_listener_started: false,
-            game_options_json: options_json,
-            relay_urls,
         })
     }
 
@@ -90,11 +64,6 @@ impl GameState {
         self.score.borrow().get_store().into()
     }
 
-    #[wasm_bindgen(getter, js_name = "networkSnapshot")]
-    pub fn network_snapshot_store(&self) -> NetworkSnapshotStore {
-        self.network_snapshot.borrow().get_store().into()
-    }
-
     #[wasm_bindgen(getter, js_name = "uiState")]
     pub fn ui_state(&self) -> UiState {
         self.ui_state.clone()
@@ -108,82 +77,6 @@ impl GameState {
     #[wasm_bindgen(getter, js_name = "elevationMax")]
     pub fn elevation_max(&self) -> f64 {
         self.elevation_max
-    }
-
-    #[wasm_bindgen(getter, js_name = "hasNetworkNode")]
-    pub fn has_network_node(&self) -> bool {
-        self.network_node.is_some()
-    }
-
-    #[wasm_bindgen(getter, js_name = "networkListenerStarted")]
-    pub fn network_listener_started(&self) -> bool {
-        self.network_listener_started
-    }
-
-    #[wasm_bindgen(getter, js_name = "endpointId")]
-    pub fn endpoint_id(&self) -> Option<String> {
-        self.network_node.as_ref().map(|node| node.endpoint_id())
-    }
-
-    #[wasm_bindgen(getter, js_name = "topicId")]
-    pub fn topic_id(&self) -> Option<String> {
-        self.network_channel.as_ref().map(|channel| channel.id())
-    }
-
-    #[wasm_bindgen(getter, js_name = "networkPeers")]
-    pub fn network_peers(&self) -> Result<Vec<Ts<NetworkPeerStatus>>, JsValue> {
-        self.collect_network_peers()
-            .iter()
-            .map(|peer| {
-                peer.into_ts()
-                    .map_err(|error| JsValue::from_str(&error.to_string()))
-            })
-            .collect()
-    }
-
-    pub(crate) fn collect_network_peers(&self) -> Vec<NetworkPeerStatus> {
-        let connected_endpoints = self.connected_endpoints.borrow().clone();
-        let mut all_endpoints = connected_endpoints.clone();
-        all_endpoints.extend(self.peer_presence.borrow().keys().cloned());
-
-        let peer_presence = self.peer_presence.borrow();
-        all_endpoints
-            .into_iter()
-            .map(|endpoint_id| {
-                let peer_entry = peer_presence.get(&endpoint_id);
-                NetworkPeerStatus::new(
-                    endpoint_id.clone(),
-                    peer_entry.and_then(|entry| entry.nickname.clone()),
-                    peer_entry.and_then(|entry| entry.last_seen_ms),
-                    connected_endpoints.contains(&endpoint_id),
-                )
-            })
-            .collect()
-    }
-
-    pub(crate) fn sync_network_snapshot(&self) {
-        let snapshot = NetworkSnapshot {
-            has_node: self.network_node.is_some(),
-            listener_started: self.network_listener_started,
-            endpoint_id: self.network_node.as_ref().map(|node| node.endpoint_id()),
-            topic_id: self.network_channel.as_ref().map(|channel| channel.id()),
-            peers: self.collect_network_peers(),
-            last_inbound_mutation_ms: *self.last_inbound_mutation_ms.borrow(),
-            last_outbound_mutation_ms: *self.last_outbound_mutation_ms.borrow(),
-            sampled_at_ms: js_sys::Date::now(),
-        };
-
-        self.network_snapshot.borrow_mut().set(snapshot);
-    }
-
-    #[wasm_bindgen(getter, js_name = "lastInboundMutationMs")]
-    pub fn last_inbound_mutation_ms(&self) -> Option<f64> {
-        *self.last_inbound_mutation_ms.borrow()
-    }
-
-    #[wasm_bindgen(getter, js_name = "lastOutboundMutationMs")]
-    pub fn last_outbound_mutation_ms(&self) -> Option<f64> {
-        *self.last_outbound_mutation_ms.borrow()
     }
 
     fn apply_generated_cells(&mut self, cells: Vec<MapCell>) -> Result<JsValue, JsValue> {
@@ -268,114 +161,6 @@ impl GameState {
             },
             MutationOrigin::Local,
         )
-    }
-
-    #[wasm_bindgen(js_name = "invite")]
-    pub async fn invite(&mut self, nickname: String) -> Result<String, JsValue> {
-        let safe = self
-            .first_safe_cell
-            .get()
-            .ok_or_else(|| JsValue::from_str("Explore a cell before inviting players"))?;
-        let mut options: GameOptions =
-            serde_wasm_bindgen::from_value(JSON::parse(&self.game_options_json)?)?;
-        options.first_safe_cell = Some(safe);
-
-        if self.network_node.is_none() {
-            let node = NetworkNode::spawn_with_relay_urls(self.relay_urls.clone())
-                .await
-                .map_err(Into::<JsValue>::into)?;
-            self.network_node = Some(node);
-        }
-
-        if self.network_channel.is_none() {
-            let node = self
-                .network_node
-                .as_ref()
-                .ok_or_else(|| JsValue::from_str("Network node is unavailable"))?;
-            let channel = node.create(nickname).await.map_err(Into::<JsValue>::into)?;
-            self.connected_endpoints
-                .borrow_mut()
-                .extend(channel.neighbors());
-            self.network_channel = Some(channel);
-            let id = self.network_node.as_ref().unwrap().endpoint_id();
-            self.session.borrow_mut().local_id = Some(id.clone());
-            self.session.borrow_mut().authority = Some(id);
-            self.attach_network_listener();
-            self.sync_network_snapshot();
-        }
-
-        let channel = self
-            .network_channel
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("Network channel is unavailable"))?;
-        options.authority = self.session.borrow().authority.clone();
-        options.sync_version = Some(crate::sync::PROTOCOL);
-        let invite_options: String =
-            JSON::stringify(&serde_wasm_bindgen::to_value(&options)?)?.into();
-        let ticket_opts = TicketOpts {
-            include_myself: true,
-            include_bootstrap: true,
-            include_neighbors: true,
-        };
-
-        channel
-            .ticket_with_game_options(ticket_opts, Some(invite_options))
-            .map_err(Into::<JsValue>::into)
-    }
-
-    #[wasm_bindgen(js_name = "optionsFromTicket")]
-    pub fn options_from_ticket(ticket: String) -> Result<Ts<GameOptions>, JsValue> {
-        let parsed_ticket = GameTicket::deserialize(&ticket)
-            .map_err(|err| JsValue::from_str(&format!("Invalid game ticket: {err}")))?;
-        let options_json = parsed_ticket
-            .game_options_json
-            .ok_or_else(|| JsValue::from_str("Ticket does not include game options"))?;
-        let options_value = JSON::parse(&options_json)?;
-        let options: GameOptions = serde_wasm_bindgen::from_value(options_value)?;
-        if options.sync_version != Some(crate::sync::PROTOCOL)
-            || options.authority.is_none()
-            || options.first_safe_cell.is_none()
-        {
-            return Err(JsValue::from_str(
-                "Incompatible invitation; ask the host to create a new invite",
-            ));
-        }
-        options
-            .into_ts()
-            .map_err(|error| JsValue::from_str(&error.to_string()))
-    }
-
-    /// Spawn a network node and join the gossip topic described by `ticket`.
-    ///
-    /// The caller is responsible for having populated the map cells (typically
-    /// via [`GameState::apply_map_cells`]) before invoking this; the function
-    /// waits for an authoritative snapshot before allowing gameplay.
-    #[wasm_bindgen(js_name = "joinAsPeer")]
-    pub async fn join_as_peer(&mut self, ticket: String, nickname: String) -> Result<(), JsValue> {
-        let node = NetworkNode::spawn_with_relay_urls(self.relay_urls.clone())
-            .await
-            .map_err(Into::<JsValue>::into)?;
-        let channel = node
-            .join(ticket, nickname)
-            .await
-            .map_err(Into::<JsValue>::into)?;
-        self.connected_endpoints
-            .borrow_mut()
-            .extend(channel.neighbors());
-        self.session.borrow_mut().local_id = Some(node.endpoint_id());
-        self.network_node = Some(node);
-        self.network_channel = Some(channel);
-        self.attach_network_listener();
-        self.sync_network_snapshot();
-        for _ in 0..200 {
-            if self.session.borrow().ready {
-                return Ok(());
-            }
-            n0_future::time::sleep(n0_future::time::Duration::from_millis(100)).await;
-        }
-        Err(JsValue::from_str(
-            "Timed out waiting for the host's game state",
-        ))
     }
 }
 

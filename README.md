@@ -67,9 +67,7 @@ The existing New Game menu offers Solo, Collaborative and Territory. All
 multiplayer modes require a Kuncat account and use the trusted Rust authority.
 Collaborative games share reveals and a team score; territory use their
 respective competitive rules. Invitations join through the same menu and login flow.
-Solo stays local and does not require an account. Legacy peer synchronization code
-remains in the Rust library, but its relay settings and host/join paths are no longer
-exposed by the application.
+Solo stays local and does not require an account. Iroh transport and peer host/join APIs have been removed.
 
 See [the implementation plan](docs/multiplayer-plan.md) for rules, identity and
 architecture diagrams, and [the server guide](server/README.md) for deployment.

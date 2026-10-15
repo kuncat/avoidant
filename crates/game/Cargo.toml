@@ -23,14 +23,11 @@ chull = "0.2.4"
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
-futures-channel = "0.3.34"
-futures-util = "0.3.34"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 # bluenoise still uses rand 0.9/getrandom 0.3; enable its browser backend too.
 getrandom03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
 js-sys = "0.3.106"
 n0-future = "0.3.2"
-networking = { workspace = true }
 rand = "0.10.3"
 rand_xoshiro = "0.8.1"
 # BlueNoise requires the rand 0.9 RNG traits; keep its generator compatible.
@@ -46,7 +43,6 @@ tracing-subscriber-wasm = "0.1.0"
 voronator = "0.2.1"
 wasm-bindgen = "0.2.129"
 wasm-bindgen-futures = "0.4.79"
-wasm-streams = "0.7.0"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.79"
