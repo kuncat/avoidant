@@ -1,8 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
+import { saveHistory, listHistory, getHistory, type HistoryEnv } from "./history";
+import { engineHash, engineBundle } from "../rules/replay-engine";
 import catalog from "./catalog.json";
 import { rules, type Result, type Snapshot } from "./rules";
 
-interface Env {
+interface Env extends HistoryEnv {
   MATCHES: DurableObjectNamespace<MatchRoom>;
   ALLOWED_ORIGINS: string;
   ACCOUNT_API: string;
@@ -15,6 +17,11 @@ interface Saved {
   created: number;
   id?: string;
   archived?: boolean;
+  initial?: { format: 1; state: string; map: unknown; engine: string };
+  eventCount?: number;
+  engines?: string[];
+  replayKey?: string;
+  replaySha256?: string;
   cleanupAt?: number;
 }
 interface Attachment {
@@ -72,13 +79,18 @@ export default {
     let response: Response;
     try {
       const url = new URL(request.url);
+      const historyPath =
+        /^\/history\/([a-f0-9-]{36})\/(replay|initial|engines\/([a-f0-9]{64}))$/.exec(url.pathname);
       const match = /^\/matches\/([^/]+)(?:\/(connect|socket))?$/.exec(url.pathname);
       if (match && uuid.test(match[1]) && match[2] === "socket" && request.method === "GET") {
         // The room consumes a short-lived single-use ticket; never put bearer tokens in URLs.
         return await env.MATCHES.get(env.MATCHES.idFromName(match[1])).fetch(request);
       }
       if (
-        !(request.method === "GET" && url.pathname === "/history") &&
+        !(
+          request.method === "GET" &&
+          (url.pathname === "/history" || (historyPath && uuid.test(historyPath[1])))
+        ) &&
         (request.method !== "POST" ||
           (url.pathname !== "/matches" &&
             !(match && uuid.test(match[1]) && match[2] === "connect")))
@@ -107,14 +119,38 @@ export default {
         account.expiresAt <= Date.now()
       )
         throw new Error("Invalid account response");
-      if (url.pathname === "/history") {
-        const historyUrl = new URL("https://internal/history");
-        const cursor = url.searchParams.get("cursor");
-        if (cursor) historyUrl.searchParams.set("cursor", cursor);
-        const history = await env.MATCHES.get(
-          env.MATCHES.idFromName(`history:${account.id}`),
-        ).fetch(historyUrl);
-        return reply(await history.json(), history.status);
+      if (url.pathname === "/history" || historyPath) {
+        try {
+          if (!historyPath)
+            return reply(await listHistory(env, account.id, url.searchParams.get("cursor")));
+          const record = await getHistory(env, account.id, historyPath[1]);
+          if (!record) return reply({ error: "Match not found" }, 404);
+          if (historyPath[2] === "initial") return reply(record.initial);
+          const key = historyPath[3]
+            ? record.engines.includes(historyPath[3])
+              ? `engines/${historyPath[3]}.json`
+              : null
+            : record.replayKey;
+          if (!key) return reply({ error: "Replay not available" }, 404);
+          const object = await env.REPLAYS.get(key);
+          if (!object) return reply({ error: "Replay unavailable" }, 503);
+          return new Response(object.body, {
+            headers: {
+              ...cors,
+              "Cache-Control": "private, no-store",
+              "Content-Type": historyPath[3] ? "application/json" : "application/gzip",
+              ...(historyPath[3]
+                ? {}
+                : {
+                    "X-Replay-SHA256": record.replaySha256,
+                    "Access-Control-Expose-Headers": "X-Replay-SHA256",
+                  }),
+              "Content-Disposition": `attachment; filename="${historyPath[3] ?? historyPath[1]}.${historyPath[3] ? "json" : "ndjson.gz"}"`,
+            },
+          });
+        } catch {
+          return reply({ error: "History unavailable" }, 503);
+        }
       }
       if (
         env.REQUIRE_ENTITLEMENT !== "false" &&
@@ -201,17 +237,36 @@ export class MatchRoom extends DurableObject<Env> {
       this.saved = await ctx.storage.get<Saved>("match");
     });
   }
-  private async persist(result: Result) {
+  private async persist(result: Result, command?: unknown) {
+    const changed =
+      command !== undefined && result.snapshot.revision !== this.saved?.snapshot.revision;
+    const engines = [...(this.saved?.engines ?? [])];
+    if (changed && !engines.includes(engineHash)) {
+      // Preserve the exact executable rules, including across later deployments.
+      if (!(await this.environment.REPLAYS.head(`engines/${engineHash}.json`)))
+        await this.environment.REPLAYS.put(`engines/${engineHash}.json`, engineBundle);
+      engines.push(engineHash);
+    }
     const saved = {
       ...this.saved!,
       state: result.state,
       snapshot: result.snapshot,
+      engines,
+      eventCount: (this.saved?.eventCount ?? 0) + (changed ? 1 : 0),
       // Reconnects and rejected moves must not postpone finished-room cleanup.
       cleanupAt: result.snapshot.finished
         ? (this.saved?.cleanupAt ?? Date.now() + 60_000)
         : undefined,
     };
-    await this.ctx.storage.put("match", saved);
+    // One atomic multi-key write commits the authoritative state and its journal entry.
+    await this.ctx.storage.put({
+      match: saved,
+      ...(changed
+        ? {
+            [`event:${String(saved.eventCount).padStart(8, "0")}`]: { engine: engineHash, command },
+          }
+        : {}),
+    });
     this.saved = saved;
     const s = result.snapshot;
     const alarm = s.finished
@@ -231,32 +286,65 @@ export class MatchRoom extends DurableObject<Env> {
   private async archive() {
     const saved = this.saved;
     if (!saved || saved.archived || !saved.snapshot.finished) return;
+    if (!saved.id) {
+      saved.id = crypto.randomUUID();
+      await this.ctx.storage.put("match", saved);
+    }
     const snapshot = saved.snapshot;
-    const record = {
-      id: saved.id ?? this.ctx.id.toString(),
+    if (saved.initial && !saved.replayKey) {
+      const storage = this.ctx.storage;
+      const encoder = new TextEncoder();
+      async function* lines() {
+        yield JSON.stringify({ type: "initial", ...saved!.initial }) + "\n";
+        let after: string | undefined;
+        while (true) {
+          const page = await storage.list({
+            prefix: "event:",
+            limit: 1000,
+            ...(after ? { startAfter: after } : {}),
+          });
+          for (const [key, event] of page) {
+            yield JSON.stringify({ type: "command", ...(event as object) }) + "\n";
+            after = key;
+          }
+          if (page.size < 1000) break;
+        }
+        yield JSON.stringify({ type: "final", state: saved!.state }) + "\n";
+      }
+      const iterator = lines();
+      const stream = new ReadableStream<BufferSource>({
+        async pull(controller) {
+          const line = await iterator.next();
+          if (line.done) controller.close();
+          else controller.enqueue(encoder.encode(line.value));
+        },
+      }).pipeThrough(new CompressionStream("gzip"));
+      const compressed = await new Response(stream).arrayBuffer();
+      const hash = Array.from(
+        new Uint8Array(await crypto.subtle.digest("SHA-256", compressed)),
+        (b) => b.toString(16).padStart(2, "0"),
+      ).join("");
+      const key = `avoidant/${saved.id}/${hash}.ndjson.gz`;
+      await this.environment.REPLAYS.put(key, compressed, {
+        httpMetadata: { contentType: "application/gzip" },
+      });
+      saved.replayKey = key;
+      saved.replaySha256 = hash;
+      await this.ctx.storage.put("match", saved);
+    }
+    await saveHistory(this.environment, {
+      id: saved.id!,
       map: saved.map,
       options: snapshot.options,
       startedAt: snapshot.startedAt,
       finishedAt: snapshot.finishedAt ?? saved.cleanupAt! - 60_000,
-      players: snapshot.players.map(({ id, name, score, claims, voids, cumulativeMs }) => ({
-        id,
-        name,
-        score,
-        claims,
-        voids,
-        cumulativeMs: cumulativeMs ?? 0,
-      })),
-    };
-    await Promise.all(
-      record.players.map(async (player) => {
-        const response = await this.environment.MATCHES.get(
-          this.environment.MATCHES.idFromName(`history:${player.id}`),
-        ).fetch(
-          new Request("https://internal/history", { method: "POST", body: JSON.stringify(record) }),
-        );
-        if (!response.ok) throw new Error("History persistence failed");
-      }),
-    );
+      players: snapshot.players,
+      // Legacy live rooms cannot recover a lost starting board or move log.
+      initial: saved.initial ?? { format: 1, unavailable: true },
+      replayKey: saved.replayKey ?? null,
+      replaySha256: saved.replaySha256 ?? null,
+      engines: saved.engines ?? [],
+    });
     saved.archived = true;
     await this.ctx.storage.put("match", saved);
   }
@@ -279,30 +367,6 @@ export class MatchRoom extends DurableObject<Env> {
     // Serialize fetch and WS mutations across every awaited storage operation.
     return this.ctx.blockConcurrencyWhile(async () => {
       const url = new URL(request.url);
-      if (url.pathname === "/history") {
-        if (request.method === "POST") {
-          const record = (await request.json()) as { id: string; finishedAt: number };
-          const key = `history:${String(record.finishedAt).padStart(16, "0")}:${record.id}`;
-          if (!(await this.ctx.storage.get(key))) await this.ctx.storage.put(key, record);
-          return json({ ok: true });
-        }
-        const cursor = url.searchParams.get("cursor");
-        if (cursor && (!cursor.startsWith("history:") || cursor.length > 150))
-          return json({ error: "Invalid cursor" }, 400);
-        const entries = [
-          ...(await this.ctx.storage.list({
-            prefix: "history:",
-            reverse: true,
-            limit: 51,
-            ...(cursor ? { end: cursor } : {}),
-          })),
-        ];
-        const page = entries.slice(0, 50);
-        return json({
-          matches: page.map(([, record]) => record),
-          nextCursor: entries.length > 50 ? page[49][0] : null,
-        });
-      }
       if (url.pathname === "/quota") {
         const now = Date.now();
         const quota = (await this.ctx.storage.get<{ start: number; count: number }>("quota")) ?? {
@@ -355,7 +419,17 @@ export class MatchRoom extends DurableObject<Env> {
           map: input.map,
           created: Date.now(),
           id: input.id,
+          initial: {
+            format: 1,
+            state: result.state,
+            map: catalog[input.map].options,
+            engine: engineHash,
+          },
+          engines: [engineHash],
+          eventCount: 0,
         };
+        if (!(await this.environment.REPLAYS.head(`engines/${engineHash}.json`)))
+          await this.environment.REPLAYS.put(`engines/${engineHash}.json`, engineBundle);
         await this.persist(result);
         return json({ ok: true });
       }
@@ -366,14 +440,15 @@ export class MatchRoom extends DurableObject<Env> {
           authExpires: number;
           name?: string;
         };
-        const result = await rules(this.saved.state, {
+        const command = {
           kind: "join",
           actor,
           name,
           now: Date.now(),
-        });
+        };
+        const result = await rules(this.saved.state, command);
+        await this.persist(result, command);
         if (result.error) return json({ error: result.error }, 409);
-        await this.persist(result);
         const ticket = crypto.randomUUID();
         const tickets = await this.ctx.storage.list({ prefix: "ticket:" });
         // Bounded transient tickets, including reconnects that never upgraded.
@@ -463,7 +538,7 @@ export class MatchRoom extends DurableObject<Env> {
           };
         else throw new Error("Invalid action");
         const result = await rules(this.saved.state, command);
-        await this.persist(result);
+        await this.persist(result, command);
         this.broadcast();
         if (result.error) ws.send(JSON.stringify({ type: "error", error: result.error }));
       } catch {
@@ -477,13 +552,23 @@ export class MatchRoom extends DurableObject<Env> {
   async alarm() {
     await this.ctx.blockConcurrencyWhile(async () => {
       if (!this.saved || this.saved.snapshot.finished || !this.saved.snapshot.started) {
-        if (this.saved?.snapshot.finished) await this.archive();
+        if (this.saved?.snapshot.finished) {
+          try {
+            await this.archive();
+          } catch {
+            for (const ws of this.ctx.getWebSockets())
+              ws.close(1011, "Match complete; archive pending");
+            await this.ctx.storage.setAlarm(Date.now() + 15 * 60_000);
+            return;
+          }
+        }
         for (const ws of this.ctx.getWebSockets()) ws.close(1000, "Match expired");
         this.saved = undefined;
         await this.ctx.storage.deleteAll();
         return;
       }
-      await this.persist(await rules(this.saved.state, { kind: "tick", now: Date.now() }));
+      const command = { kind: "tick", now: Date.now() };
+      await this.persist(await rules(this.saved.state, command), command);
       this.broadcast();
     });
   }

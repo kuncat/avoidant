@@ -54,7 +54,17 @@ try {
   const duration = a.getByLabel("Match duration", { exact: true });
   await a.getByLabel("Duration unit", { exact: true }).selectOption("hours");
   assert.equal(await duration.getAttribute("max"), "24");
+  await duration.fill("1");
+  await a.getByText("Hour", { exact: true }).waitFor();
+  assert.deepEqual(
+    await a.getByLabel("Duration unit", { exact: true }).locator("option").allTextContents(),
+    ["Minutes", "Hours"],
+  );
   await duration.fill("24");
+  await a
+    .locator("span[aria-hidden=true]")
+    .filter({ hasText: /^Hours$/ })
+    .waitFor();
   await a.getByLabel("Duration unit", { exact: true }).selectOption("minutes");
   assert.equal(await duration.getAttribute("max"), "1440");
   assert.equal(await duration.inputValue(), "1440");
@@ -208,6 +218,10 @@ try {
     await a.getByRole("columnheader", { name: "Total time", exact: true }).first().waitFor();
     await a.getByRole("cell", { name: "Asha", exact: true }).first().waitFor();
     await a.getByRole("cell", { name: "Bela", exact: true }).first().waitFor();
+    const downloadPromise = a.waitForEvent("download");
+    await a.getByRole("button", { name: "Download replay", exact: true }).first().click();
+    const download = await downloadPromise;
+    assert.match(download.suggestedFilename(), /\.ndjson\.gz$/);
     await a.screenshot({ path: `${scratch}/history.png` });
   }
   const locked = await context.newPage();

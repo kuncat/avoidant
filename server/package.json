@@ -6,15 +6,18 @@
     "dev": "wrangler dev",
     "check": "tsc --noEmit",
     "build": "wrangler deploy --dry-run --outdir dist",
-    "build:rules": "wasm-pack build ../crates/competitive --target web --out-dir ../../server/rules -- --locked",
+    "build:rules": "wasm-pack build ../crates/competitive --target web --out-dir ../../server/rules -- --locked && node scripts/replay-engine.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:ui": "node tests/ui-smoke.mjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@neondatabase/serverless": "^1.2.0"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261007.1",
-    "wrangler": "^4.0.0",
+    "@electric-sql/pglite": "^0.5.10",
+    "miniflare": "^4.0.0",
     "typescript": "^6.0.0",
-    "miniflare": "^4.0.0"
+    "wrangler": "^4.0.0"
   }
 }

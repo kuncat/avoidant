@@ -357,48 +357,121 @@ production games site.
 
 ## Player time and completed game history
 
-The trusted Rust state accumulates milliseconds per player. Turn-based games count
+The Rust authority accumulates milliseconds per player. Turn-based games count
 only the current player's turn, including timeouts and disconnections. Simultaneous
 games count elapsed participation from start (or a late collaborative join) until
 completion, including disconnected time. Lobby time is excluded. Delayed alarms
-allocate each expired turn separately and never count past the actual finish or
-match deadline. Persisted checkpoints prevent reconnects from resetting totals.
-Existing matches without checkpoints begin timing on their first updated event.
+allocate each expired turn separately and stop at the true finish or match deadline.
+
+### Storage responsibilities
+
+Use the **same Kuncat PostgreSQL database** as user management, with a separate
+`games` schema and game runtime role. `games.match` stores each completed match once:
+map and options, timestamps, full initial state, and R2 replay references.
+`games.participant` joins Kuncat account IDs to names, scores, claims, void counts,
+and cumulative time. Archive writes use a single idempotent transaction. History
+lists exclude private board state and return 50 results per page using a stable
+(timestamp, UUID) cursor. Only authenticated participants can retrieve a match.
+
+```mermaid
+flowchart LR
+  Login[Kuncat account] --> API[Authenticated game API]
+  API --> PG[(Kuncat PostgreSQL)]
+  PG --> K[kuncat.account]
+  PG --> G[games.match and games.participant]
+  Room[Live Durable Object] --> Journal[Atomic state and command journal]
+  Journal --> R2[Private R2 Standard bucket]
+  R2 --> Replay[Compressed logs and immutable rules bundles]
+  Room --> G
+```
+
+Every journal entry records the ordered, server-timestamped command and exact rules
+engine hash. The initial record freezes the entire private serialized Rust state
+(including generated void placement, graph, and initial players), map-generation
+parameters, format version, and engine identifier. A seed alone would not preserve
+a board across generator changes. Per-command engine hashes also support matches
+that span compatible rules deployments. Both the compiled WASM and its JS bindings
+are archived as a shared SHA-256-addressed bundle; each rules build is stored once.
+
+Only commands that advance the game revision are journaled: successful moves,
+starts, joins/name changes, and timeout/expiry transitions. Rejected or duplicate
+requests that only checkpoint elapsed time need no separate event: the next
+recorded timestamp accounts for the same interval. A command that advances a
+timeout before being rejected is retained. Journal and live state are written
+atomically before acknowledging the action.
 
 ```mermaid
 sequenceDiagram
   participant Player
   participant Room as Match Durable Object
-  participant Rules as Rust rules
-  participant History as Each participant's history object
-  Player->>Room: Action or reconnect
-  Room->>Rules: Advance authoritative clock
-  Rules-->>Room: Snapshot and cumulative milliseconds
-  Room->>Room: Persist state and next alarm
-  alt Finished
-    Room->>History: Idempotent result keyed by finish time and match ID
-    Room-->>Player: Final scores and time
-    Room->>Room: Cleanup alarm after one minute
+  participant R2 as Private replay bucket
+  participant PG as Kuncat games schema
+  Player->>Room: Authenticated command
+  Room->>Room: Rules transition; atomically persist state and journal
+  Room-->>Player: Snapshot
+  Note over Room: Match finishes
+  Room->>R2: One gzip NDJSON log (ordered commands and final-state check)
+  Room->>PG: Transaction: match, initial state, participants
+  PG-->>Room: Commit
+  Room->>Room: Mark archived; delete live state after cleanup grace
+  alt R2 or PostgreSQL unavailable
+    Room->>Room: Retain journal; close sockets; schedule retry in 15 minutes
   end
 ```
 
-Each authenticated account can read its own paginated history using `GET /history`.
-Results include participant names, scores, claims, void counts, configuration, map,
-and timing; they exclude hidden board data and credentials. The menu's Game history
-view and the final results table share a translated display in hours:minutes:seconds.
-Archive writes finish before live state is deleted; failures are retried by the
-cleanup alarm. History remains available after room deletion or runtime restart.
+R2 is uploaded before PostgreSQL publishes its pointer. A crash/retry may repeat a
+content-addressed upload or transaction safely. Pending archival does not keep a
+worker running; its Durable Object sleeps until the next retry alarm. No periodic
+work runs after successful cleanup. Full logs are retained in R2, not PostgreSQL.
 
-```mermaid
-flowchart LR
-  Login[Kuncat account] --> API[Authenticated history endpoint]
-  API --> H[Account history Durable Object]
-  R[Completed match] --> H
-  R --> C[Delete live room state]
-  H --> UI[Game history menu]
+### Replay retrieval and verification
+
+The Game history menu offers an authenticated replay download. Endpoints:
+
+- `GET /history`: current account's summaries, optional `cursor`.
+- `GET /history/:id/initial`: complete initial state after completion.
+- `GET /history/:id/replay`: gzip NDJSON commands, initial record, final state.
+- `GET /history/:id/engines/:sha256`: an engine used by that match, after membership checking.
+
+The private bucket has no public domain or public access policy. Unfinished match
+state is never served by these endpoints. To verify an archived game locally,
+set `KUNCAT_ACCESS_TOKEN` (and `KUNCAT_ORIGIN` if testing a different allowed origin),
+then run from `server/`:
+
+```sh
+node scripts/replay.mjs https://competitive.games.kuncat.com MATCH_UUID
 ```
 
-History reuses the existing `MATCHES` namespace with `history:<account ID>` objects.
-These have no periodic alarms or resident process. Records are retained in durable
-storage and paginated 50 at a time; storage grows with completed matches. No new
-Terraform resource or PostgreSQL schema is required.
+The tool verifies engine hashes, applies each command using its archived engine,
+and checks equality with the exact final private state. This implements replay
+storage/download and deterministic verification; a visual playback UI is future work.
+Old already-finished Durable Object histories are not automatically imported.
+Legacy live rooms without the new initial record can save results, but are marked
+without replay availability; their missing initial board/log cannot be recreated.
+Drain live matches before incompatible state-format upgrades.
+
+### Cost and provisioning
+
+[Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/) checked
+2026-10-15: Standard is $0.015/GB-month, $4.50/million Class A operations,
+$0.36/million Class B operations, with no egress fee. Its monthly free allowance is
+10 GB-month, one million Class A and ten million Class B requests. Billing rounds
+up usage units. Infrequent Access saves $0.005/GB-month but has higher operation
+prices, retrieval fees, a 30-day minimum, and no free allowance; it is unsuitable
+for this small initial workload. At 10,000 completed games/month averaging 100 KB
+compressed each, logs add about 1 GB/month; actual size and retention determine
+storage costs. This estimate excludes live Durable Object and PostgreSQL usage.
+
+Live journals add small Durable Object writes alongside existing state writes;
+compression and one archive upload per match avoid per-move R2 or PG requests.
+Histories are retained indefinitely pending a future product retention policy.
+The sibling infra `platform/multiplayer` root manages the protected R2 bucket and
+its Worker binding. Apply `platform/migrations/002_games.sql` from `kuncat.com` as
+the migration owner, then set the game Worker's `DATABASE_URL` secret to the same
+Kuncat database using a distinct role with only games-schema SELECT/INSERT rights.
+No database credentials enter Terraform state.
+
+The normal local multiplayer launcher uses embedded PostgreSQL (PGlite) with the
+real Kuncat migrations, plus local Miniflare R2 and Durable Objects. Test accounts
+have deterministic UUIDs; cloud identity is never bypassed in production. Local
+launcher state is ephemeral and resets on restart. No cloud account is needed.

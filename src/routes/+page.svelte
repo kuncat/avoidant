@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { localActorId } from "$lib/multiplayer/local-identity";
   import { onMount } from "svelte";
   import AvoidantGame from "$lib/components/AvoidantGame.svelte";
   import type { CompetitiveConfig } from "$lib/multiplayer/types";
@@ -17,7 +18,7 @@
       serverUrl: `http://${window.location.hostname}:${import.meta.env.VITE_LOCAL_COMPETITIVE_PORT}`,
       account: {
         completeLogin: async () => {},
-        account: async () => ({ id: actor, username: actor, capabilities: [] }),
+        account: async () => ({ id: localActorId(actor), username: actor, capabilities: [] }),
         token: async () => actor,
         login: async () => {},
         logout: async () => {},

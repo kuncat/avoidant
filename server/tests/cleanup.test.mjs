@@ -56,57 +56,40 @@ test("finished room cleanup cannot be extended by repeated persistence", async (
   assert.equal(room.saved, undefined);
 });
 
-test("history failures prevent deletion and successful retry archives once per player", async () => {
+test("history failures retain state and schedule a retry without keeping sockets alive", async () => {
   let deleted = false,
-    fail = true,
-    writes = 0;
+    closed = false,
+    alarm = 0;
   const ctx = {
-    id: { toString: () => "match-id" },
     storage: {
       get: async () => undefined,
-      put: async () => {},
-      setAlarm: async () => {},
+      setAlarm: async (value) => {
+        alarm = value;
+      },
       deleteAll: async () => {
         deleted = true;
       },
     },
     blockConcurrencyWhile: (fn) => fn(),
-    getWebSockets: () => [],
-  };
-  const room = new MatchRoom(ctx, {
-    MATCHES: {
-      idFromName: (name) => name,
-      get: () => ({
-        fetch: async () => {
-          writes++;
-          return new Response(null, { status: fail ? 503 : 200 });
+    getWebSockets: () => [
+      {
+        close: () => {
+          closed = true;
         },
-      }),
-    },
-  });
-  await Promise.resolve();
-  room.saved = {
-    state: "",
-    map: "small",
-    created: 0,
-    cleanupAt: 1,
-    snapshot: {
-      finished: true,
-      started: true,
-      finishedAt: 10,
-      players: [
-        { id: "a", cumulativeMs: 10 },
-        { id: "b", cumulativeMs: 10 },
-      ],
-    },
+      },
+    ],
   };
-  await assert.rejects(room.alarm(), /History persistence failed/);
+  const room = new MatchRoom(ctx, {});
+  await Promise.resolve();
+  room.saved = { snapshot: { finished: true } };
+  room.archive = async () => {
+    throw new Error("Database offline");
+  };
+  await room.alarm();
   assert.equal(deleted, false);
-  fail = false;
-  await room.archive();
-  assert.equal(writes, 4);
-  await room.archive();
-  assert.equal(writes, 4);
+  assert.equal(closed, true);
+  assert.ok(alarm > Date.now() + 14 * 60_000);
+  room.archive = async () => {};
   await room.alarm();
   assert.equal(deleted, true);
 });

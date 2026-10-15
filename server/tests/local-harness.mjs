@@ -1,4 +1,5 @@
 // Only this local harness mocks identity. Never included in the Worker bundle.
+import { database } from "./local-database.mjs";
 import { Miniflare } from "miniflare";
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,7 @@ export async function startLocalMultiplayer({ lanHost, webPort = 5174, serverPor
   const browserOrigin = `http://${lanHost ?? "127.0.0.1"}:${webPort}`;
 
   const root = fileURLToPath(new URL("../../", import.meta.url));
+  let pg;
   let vite,
     mf,
     logs = "";
@@ -23,6 +25,7 @@ export async function startLocalMultiplayer({ lanHost, webPort = 5174, serverPor
       await stopped;
     }
     await mf?.dispose();
+    await pg?.db.close();
   };
   try {
     // Refuse occupied ports before starting child processes.
@@ -33,6 +36,7 @@ export async function startLocalMultiplayer({ lanHost, webPort = 5174, serverPor
         probe.listen(port, bindHost, () => probe.close(resolve));
       });
     }
+    pg = await database();
     mf = new Miniflare({
       port: serverPort,
       host: bindHost,
@@ -44,17 +48,21 @@ export async function startLocalMultiplayer({ lanHost, webPort = 5174, serverPor
       ],
       compatibilityDate: "2026-06-01",
       durableObjects: { MATCHES: { className: "MatchRoom", useSQLite: true } },
+      r2Buckets: ["REPLAYS"],
       bindings: {
+        DATABASE_URL: "postgresql://test:test@db.test/kuncat",
         ALLOWED_ORIGINS: [...new Set([`http://127.0.0.1:${webPort}`, browserOrigin])].join(","),
         ACCOUNT_API: "https://accounts.test",
         REQUIRE_ENTITLEMENT: "false",
       },
-      outboundService: async (request) =>
-        Response.json({
-          id: request.headers.get("Authorization").slice(7),
+      outboundService: async (request) => {
+        if (new URL(request.url).pathname === "/sql") return pg.fetch(request);
+        return Response.json({
+          id: await pg.account(request.headers.get("Authorization").slice(7)),
           capabilities: [],
           expiresAt: Date.now() + 900000,
-        }),
+        });
+      },
     });
     await mf.ready;
     vite = spawn(

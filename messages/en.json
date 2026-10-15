@@ -233,5 +233,7 @@
         "countPlural=other": "Minutes"
       }
     }
-  ]
+  ],
+  "action_download_replay": "Download replay",
+  "error_replay": "Could not download the replay. Try again."
 }

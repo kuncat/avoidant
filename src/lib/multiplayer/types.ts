@@ -73,6 +73,7 @@ export interface MultiplayerSetup {
 }
 
 export interface MatchHistory {
+  replayAvailable?: boolean;
   id: string;
   map: string;
   options: MatchSnapshot["options"];

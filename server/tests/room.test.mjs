@@ -1,13 +1,22 @@
-import { test as nodeTest } from "node:test";
+import { test as nodeTest, after } from "node:test";
 const test = (name, run) => nodeTest(name, { timeout: 15_000 }, run);
 import assert from "node:assert/strict";
+import { replay } from "../scripts/replay.mjs";
+import { database } from "./local-database.mjs";
+const databases = new Map();
+after(async () => {
+  for (const pg of databases.values()) await (await pg).db.close();
+});
 import { Miniflare } from "miniflare";
 import { readdirSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 function runtime(requireEntitlement = "false", persist, authTtl = 900_000) {
-  return new Miniflare({
+  const key = persist ?? Symbol();
+  if (!databases.has(key)) databases.set(key, database());
+  const pg = databases.get(key);
+  const mf = new Miniflare({
     modules: [
       { type: "ESModule", path: resolve("dist/index.js") },
       ...readdirSync("dist")
@@ -16,23 +25,36 @@ function runtime(requireEntitlement = "false", persist, authTtl = 900_000) {
     ],
     compatibilityDate: "2026-06-01",
     durableObjectsPersist: persist,
+    r2Buckets: ["REPLAYS"],
+    r2Persist: persist ? `${persist}/r2` : undefined,
     durableObjects: { MATCHES: { className: "MatchRoom", useSQLite: true } },
     bindings: {
+      DATABASE_URL: "postgresql://test:test@db.test/kuncat",
       ALLOWED_ORIGINS: "https://games.example",
       ACCOUNT_API: "https://accounts.example",
       REQUIRE_ENTITLEMENT: requireEntitlement,
     },
     outboundService: async (request) => {
+      if (new URL(request.url).pathname === "/sql") return (await pg).fetch(request);
       const token = request.headers.get("Authorization");
       if (!["Bearer a", "Bearer b", "Bearer c"].includes(token))
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       return Response.json({
-        id: token.slice(7),
+        id: await (await pg).account(token.slice(7)),
         capabilities: [],
         expiresAt: Date.now() + authTtl,
       });
     },
   });
+  const dispose = mf.dispose.bind(mf);
+  mf.dispose = async () => {
+    await dispose();
+    if (!persist) {
+      await (await pg).db.close();
+      databases.delete(key);
+    }
+  };
+  return mf;
 }
 const headers = (actor = "a") => ({
   Origin: "https://games.example",
@@ -325,14 +347,46 @@ test("completed times survive restart in private history", async () => {
     const b = await connect(mf, id, "b", "Bela");
     a.ws.send(JSON.stringify({ kind: "start" }));
     await a.next((m) => m.type === "snapshot" && m.snapshot.started);
-    a.ws.send(JSON.stringify({ kind: "move", sequence: 1, action: { kind: "pass" } }));
+    a.ws.send(JSON.stringify({ kind: "move", sequence: 1, action: { kind: "select", cell: 0 } }));
     await b.next((m) => m.type === "snapshot" && m.snapshot.turn === 1);
     b.ws.send(JSON.stringify({ kind: "move", sequence: 1, action: { kind: "pass" } }));
+    await a.next((m) => m.type === "snapshot" && m.snapshot.players[1]?.sequence === 1);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    a.ws.send(JSON.stringify({ kind: "move", sequence: 2, action: { kind: "pass" } }));
     const { snapshot } = await b.next((m) => m.type === "snapshot" && m.snapshot.finished);
     assert.equal(
       snapshot.players.reduce((sum, p) => sum + p.cumulativeMs, 0),
       snapshot.finishedAt - snapshot.startedAt,
     );
+    const replayResponse = await mf.dispatchFetch(`https://game.example/history/${id}/replay`, {
+      headers: headers("a"),
+    });
+    assert.equal(replayResponse.status, 200);
+    const compressed = Buffer.from(await replayResponse.arrayBuffer());
+    const verified = await replay(compressed, async (hash) => {
+      const response = await mf.dispatchFetch(
+        `https://game.example/history/${id}/engines/${hash}`,
+        { headers: headers("b") },
+      );
+      assert.equal(response.status, 200);
+      return response.text();
+    });
+    assert.equal(verified.moves, 3);
+    assert.equal(
+      (
+        await mf.dispatchFetch(`https://game.example/history/${id}/replay`, {
+          headers: headers("c"),
+        })
+      ).status,
+      404,
+    );
+    const initial = await (
+      await mf.dispatchFetch(`https://game.example/history/${id}/initial`, {
+        headers: headers("a"),
+      })
+    ).json();
+    assert.ok(JSON.parse(initial.state).voids.length > 0);
+    assert.ok(initial.map.shape);
     a.ws.close();
     b.ws.close();
     await mf.dispose();

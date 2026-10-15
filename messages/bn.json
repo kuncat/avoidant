@@ -224,5 +224,7 @@
         "countPlural=other": "মিনিট"
       }
     }
-  ]
+  ],
+  "action_download_replay": "রিপ্লে ডাউনলোড করুন",
+  "error_replay": "রিপ্লে ডাউনলোড করা যায়নি। আবার চেষ্টা করুন।"
 }

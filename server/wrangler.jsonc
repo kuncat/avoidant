@@ -3,6 +3,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
   "durable_objects": { "bindings": [{ "name": "MATCHES", "class_name": "MatchRoom" }] },
+  "r2_buckets": [{ "binding": "REPLAYS", "bucket_name": "kuncat-game-replays" }],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MatchRoom"] }],
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4321",

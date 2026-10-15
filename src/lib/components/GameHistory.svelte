@@ -7,6 +7,8 @@
   let { config, onexit }: { config: CompetitiveConfig; onexit: () => void } = $props();
   let matches = $state<MatchHistory[]>([]);
   let cursor = $state<string | null>(null);
+  let downloading = $state<string | null>(null);
+  let downloadFailed = $state(false);
   let busy = $state(false);
   let failed = $state(false);
   async function load() {
@@ -29,6 +31,29 @@
       failed = true;
     } finally {
       busy = false;
+    }
+  }
+  async function downloadReplay(id: string) {
+    downloading = id;
+    downloadFailed = false;
+    try {
+      const url = new URL(`history/${id}/replay`, config.serverUrl.replace(/\/?$/, "/"));
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${await config.account.token()}` },
+      });
+      if (!response.ok) throw new Error("Replay unavailable");
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `avoidant-${id}.ndjson.gz`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    } catch {
+      downloadFailed = true;
+    } finally {
+      downloading = null;
     }
   }
   onMount(() => {
@@ -57,8 +82,14 @@
           {new Date(match.finishedAt).toLocaleString(getLocale())}
         </p>
         <MatchResults players={match.players} turnBased={match.options.turnBased} />
+        {#if match.replayAvailable}<button
+            class="btn mt-2 btn-sm"
+            disabled={downloading !== null}
+            onclick={() => downloadReplay(match.id)}>{m.action_download_replay()}</button
+          >{/if}
       </article>
     {/each}
+    {#if downloadFailed}<p role="alert">{m.error_replay()}</p>{/if}
     {#if failed}<p role="alert">{m.error_history()}</p>{:else if !busy && !matches.length}<p
         class="my-4"
       >
