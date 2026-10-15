@@ -741,7 +741,7 @@
                       help={m.help_match_duration()}
                     /></label
                   >
-                  <div class="join w-44 shrink-0">
+                  <div class="join w-36 shrink-0">
                     <input
                       id="match-duration"
                       class="input join-item min-w-0 flex-1 text-right input-sm"
@@ -753,23 +753,33 @@
                       aria-label={m.field_match_duration()}
                       bind:value={matchDuration}
                     />
-                    <select
-                      class="select join-item w-24 select-sm"
-                      aria-label={m.field_duration_unit()}
-                      value={matchUnit}
-                      onchange={(event) => {
-                        const unit = event.currentTarget.value as "minutes" | "hours";
-                        const minutes = matchDuration * (matchUnit === "hours" ? 60 : 1);
-                        matchDuration = Math.min(
-                          unit === "hours" ? 24 : 1440,
-                          Math.max(1, Math.ceil(unit === "hours" ? minutes / 60 : minutes)),
-                        );
-                        matchUnit = unit;
-                      }}
-                      ><option value="minutes">{m.unit_minutes()}</option><option value="hours"
-                        >{m.unit_hours()}</option
-                      ></select
-                    >
+                    <div class="relative join-item w-24 shrink-0">
+                      <select
+                        class="select w-full text-transparent select-sm [&>option]:text-base-content"
+                        aria-label={m.field_duration_unit()}
+                        value={matchUnit}
+                        onchange={(event) => {
+                          const unit = event.currentTarget.value as "minutes" | "hours";
+                          const minutes = matchDuration * (matchUnit === "hours" ? 60 : 1);
+                          matchDuration = Math.min(
+                            unit === "hours" ? 24 : 1440,
+                            Math.max(1, Math.ceil(unit === "hours" ? minutes / 60 : minutes)),
+                          );
+                          matchUnit = unit;
+                        }}
+                        ><option value="minutes">{m.unit_minutes()}</option><option value="hours"
+                          >{m.unit_hours()}</option
+                        ></select
+                      >
+                      <span
+                        aria-hidden="true"
+                        class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-base-content"
+                      >
+                        {matchUnit === "hours"
+                          ? m.unit_hours_selected({ count: matchDuration ?? 0 })
+                          : m.unit_minutes_selected({ count: matchDuration ?? 0 })}
+                      </span>
+                    </div>
                   </div>
                 </div>
               {/if}
@@ -880,7 +890,7 @@
                     for="flood-limit"
                     ><OptionHelp label={m.field_flood_limit()} help={m.help_flood_limit()} /></label
                   >
-                  <div class="join w-30 shrink-0" role="group" aria-label={m.field_flood_limit()}>
+                  <div class="join w-24 shrink-0" role="group" aria-label={m.field_flood_limit()}>
                     <input
                       id="flood-limit"
                       class="input join-item min-w-0 flex-1 text-right input-sm focus:outline-none"

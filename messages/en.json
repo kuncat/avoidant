@@ -213,5 +213,25 @@
   "help_participation_time": "Elapsed time from joining play until the match ends, including disconnected time (hours:minutes:seconds).",
   "error_history": "Could not load game history. Try again.",
   "history_empty": "Completed multiplayer games will appear here.",
-  "action_load_more": "Load more"
+  "action_load_more": "Load more",
+  "unit_hours_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Hour",
+        "countPlural=other": "Hours"
+      }
+    }
+  ],
+  "unit_minutes_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Minute",
+        "countPlural=other": "Minutes"
+      }
+    }
+  ]
 }

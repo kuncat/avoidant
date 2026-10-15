@@ -204,5 +204,25 @@
   "help_participation_time": "খেলায় যোগ দেওয়া থেকে ম্যাচ শেষ হওয়া পর্যন্ত সময়, সংযোগ বিচ্ছিন্ন থাকা সময়সহ (ঘণ্টা:মিনিট:সেকেন্ড)।",
   "error_history": "খেলার ইতিহাস লোড করা যায়নি। আবার চেষ্টা করুন।",
   "history_empty": "সমাপ্ত মাল্টিপ্লেয়ার গেম এখানে দেখা যাবে।",
-  "action_load_more": "আরও দেখুন"
+  "action_load_more": "আরও দেখুন",
+  "unit_hours_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "ঘণ্টা",
+        "countPlural=other": "ঘণ্টা"
+      }
+    }
+  ],
+  "unit_minutes_selected": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "মিনিট",
+        "countPlural=other": "মিনিট"
+      }
+    }
+  ]
 }
