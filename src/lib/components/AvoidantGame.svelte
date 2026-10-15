@@ -883,7 +883,7 @@
                       class="input join-item min-w-0 flex-1 text-right input-sm focus:outline-none"
                       aria-label={m.field_flood_cells()}
                       type="number"
-                      min={infiniteFlood ? undefined : 1}
+                      min={infiniteFlood ? undefined : 0}
                       max={infiniteFlood ? undefined : 4096}
                       step="1"
                       required={!infiniteFlood}
