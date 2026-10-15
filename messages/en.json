@@ -192,5 +192,21 @@
   "field_match_duration": "Match duration",
   "field_duration_unit": "Duration unit",
   "unit_minutes": "Minutes",
-  "unit_hours": "Hours"
+  "unit_hours": "Hours",
+  "help_play_mode": "Choose solo play, a shared cooperative board, a turn-based duel, or competing territories.",
+  "help_player_name": "Your name in the lobby, scores, and turn notices. You can change it in the lobby before play starts.",
+  "help_match_duration": "Time allowed from match start. Maximum 24 hours. The server ends the match even if everyone disconnects.",
+  "help_tutorial_mode": "Show guided tips for the controls and finding safe cells. Available with preset map sizes.",
+  "help_bordering": "Claims must touch your existing territory. Players receive a starting cell when enabled; otherwise the board starts unexplored.",
+  "help_turn_based": "Players act one at a time. When off, everyone can explore and claim cells simultaneously.",
+  "help_turn_timer": "Automatically pass a player’s turn when time runs out. Turning this off does not disable the match duration limit.",
+  "help_turn_seconds": "Seconds allowed for each turn. The server enforces the countdown, including while a player is disconnected.",
+  "help_flood_limit": "Maximum additional cells revealed by a flood, excluding the clicked cell. ∞ allows unlimited reveals. Floods do not claim extra territory.",
+  "help_map": "Choose the board’s surface. Flat maps are planar; the other shapes can be rotated to explore every side.",
+  "help_map_size": "Choose the number of cells. Larger maps take longer to explore. Custom sizes are available in solo mode.",
+  "help_size": "Set the total number of cells, from 32 to 5,000.",
+  "help_void_fraction": "Fraction of cells that are voids. For example, 0.15 means about 15%. Higher values make safe cells harder to find.",
+  "help_spikiness": "Adjust the unevenness of the terrain. Higher values produce sharper peaks.",
+  "help_seed": "The same seed and map settings reproduce the same board. Use the dice button to choose a random seed.",
+  "option_help": "Help: {label}"
 }

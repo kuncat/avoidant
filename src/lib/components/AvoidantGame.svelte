@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import OptionHelp from "./OptionHelp.svelte";
   import ScoreSummary from "./ScoreSummary.svelte";
   import MapIcon from "./MapIcon.svelte";
   import MultiplayerGame from "./MultiplayerGame.svelte";
@@ -655,7 +656,9 @@
         >
           <div class="-mx-3 mb-2 flex flex-wrap">
             <div class="mb-4 w-full px-3">
-              <span class="field-label">{m.field_play_mode()}</span>
+              <span class="field-label"
+                ><OptionHelp label={m.field_play_mode()} help={m.help_play_mode()} /></span
+              >
               <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {#each playModes as mode (mode.id)}
                   <button
@@ -712,12 +715,15 @@
                 <label
                   class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
                 >
-                  <span>{m.field_player_name()}</span>
+                  <span
+                    ><OptionHelp label={m.field_player_name()} help={m.help_player_name()} /></span
+                  >
                   <input
                     class="input w-30 min-w-0 text-right input-sm"
                     type="text"
                     maxlength="32"
                     required
+                    aria-label={m.field_player_name()}
                     bind:value={playerNameInput}
                   />
                 </label>
@@ -726,7 +732,11 @@
                 <div class="flex w-full items-center justify-between gap-4">
                   <label
                     class="label text-left whitespace-normal text-base-content"
-                    for="match-duration">{m.field_match_duration()}</label
+                    for="match-duration"
+                    ><OptionHelp
+                      label={m.field_match_duration()}
+                      help={m.help_match_duration()}
+                    /></label
                   >
                   <div class="join w-44 shrink-0">
                     <input
@@ -737,6 +747,7 @@
                       max={matchUnit === "hours" ? 24 : 1440}
                       step="1"
                       required
+                      aria-label={m.field_match_duration()}
                       bind:value={matchDuration}
                     />
                     <select
@@ -765,11 +776,17 @@
                     class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
                     for="tutorial-mode"
                   >
-                    <span>{m.field_tutorial_mode()}</span>
+                    <span
+                      ><OptionHelp
+                        label={m.field_tutorial_mode()}
+                        help={m.help_tutorial_mode()}
+                      /></span
+                    >
                     <input
                       id="tutorial-mode"
                       type="checkbox"
                       class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                      aria-label={m.field_tutorial_mode()}
                       bind:checked={isTutorialMode}
                       disabled={sizePreset === "custom"}
                     />
@@ -784,9 +801,15 @@
                     >
                       <label
                         class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
-                        ><span>{m.field_bordering()}</span><input
+                        ><span
+                          ><OptionHelp
+                            label={m.field_bordering()}
+                            help={m.help_bordering()}
+                          /></span
+                        ><input
                           type="checkbox"
                           class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                          aria-label={m.field_bordering()}
                           bind:checked={bordering}
                         /></label
                       >
@@ -796,9 +819,15 @@
                     >
                       <label
                         class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
-                        ><span>{m.field_turn_based()}</span><input
+                        ><span
+                          ><OptionHelp
+                            label={m.field_turn_based()}
+                            help={m.help_turn_based()}
+                          /></span
+                        ><input
                           type="checkbox"
                           class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                          aria-label={m.field_turn_based()}
                           bind:checked={turnBased}
                         /></label
                       >
@@ -809,22 +838,34 @@
                   <div class="grid gap-2" transition:slide={{ duration: 180 }}>
                     <label
                       class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
-                      ><span>{m.field_turn_timer()}</span><input
+                      ><span
+                        ><OptionHelp
+                          label={m.field_turn_timer()}
+                          help={m.help_turn_timer()}
+                        /></span
+                      ><input
                         type="checkbox"
                         class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                        aria-label={m.field_turn_timer()}
                         bind:checked={turnTimer}
                       /></label
                     >
                     {#if turnTimer}<label
                         class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
                         transition:slide={{ duration: 180 }}
-                        ><span>{m.field_turn_seconds()}</span><input
+                        ><span
+                          ><OptionHelp
+                            label={m.field_turn_seconds()}
+                            help={m.help_turn_seconds()}
+                          /></span
+                        ><input
                           class="input w-30 text-right input-sm"
                           type="number"
                           min="1"
                           max="86400"
                           step="1"
                           required
+                          aria-label={m.field_turn_seconds()}
                           bind:value={turnSeconds}
                         /></label
                       >{/if}
@@ -833,7 +874,8 @@
                 <div class="form-control flex w-full flex-row items-center justify-between gap-4">
                   <label
                     class="label text-left whitespace-normal text-base-content"
-                    for="flood-limit">{m.field_flood_limit()}</label
+                    for="flood-limit"
+                    ><OptionHelp label={m.field_flood_limit()} help={m.help_flood_limit()} /></label
                   >
                   <div class="join w-30 shrink-0" role="group" aria-label={m.field_flood_limit()}>
                     <input
@@ -841,10 +883,10 @@
                       class="input join-item min-w-0 flex-1 text-right input-sm focus:outline-none"
                       aria-label={m.field_flood_cells()}
                       type="number"
-                      min="1"
-                      max="4096"
+                      min={infiniteFlood ? undefined : 1}
+                      max={infiniteFlood ? undefined : 4096}
                       step="1"
-                      required
+                      required={!infiniteFlood}
                       class:input-ghost={infiniteFlood}
                       class:border-base-300={infiniteFlood}
                       class:border-2={!infiniteFlood}
@@ -867,8 +909,10 @@
                 </div>
               {/if}
             </fieldset>
-            <div class="mb-4 w-full px-3" role="group" aria-labelledby="map-label">
-              <span id="map-label" class="field-label">{m.field_map()}</span>
+            <div class="mb-4 w-full px-3" role="group" aria-label={m.field_map()}>
+              <span id="map-label" class="field-label"
+                ><OptionHelp label={m.field_map()} help={m.help_map()} /></span
+              >
               <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {#each SHAPE_KINDS as kind (kind)}
                   <button
@@ -890,7 +934,9 @@
             >
               <legend class="fieldset-legend">{m.label_map_options()}</legend>
               <div class="w-full">
-                <span class="field-label">{m.field_map_size()}</span>
+                <span class="field-label"
+                  ><OptionHelp label={m.field_map_size()} help={m.help_map_size()} /></span
+                >
                 <div class="grid grid-cols-4 gap-2">
                   {#each presetIcons as preset (preset.value)}
                     <button
@@ -953,7 +999,7 @@
                     <label
                       class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
                       for="size-input"
-                      >{m.field_size()}
+                      ><OptionHelp label={m.field_size()} help={m.help_size()} />
                       <input
                         class="input w-32 input-sm"
                         id="size-input"
@@ -962,6 +1008,7 @@
                         min="32"
                         max="5000"
                         step="1"
+                        aria-label={m.field_size()}
                         bind:value={numCellsInput}
                       />
                     </label>
@@ -1000,13 +1047,19 @@
                       >
                         <label
                           class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
-                          ><span>{m.field_void_fraction()}</span><input
+                          ><span
+                            ><OptionHelp
+                              label={m.field_void_fraction()}
+                              help={m.help_void_fraction()}
+                            /></span
+                          ><input
                             class="input w-24 text-right input-sm"
                             max="0.999"
                             min="0"
                             required
                             step="0.00001"
                             type="number"
+                            aria-label={m.field_void_fraction()}
                             bind:value={voidFractionInput}
                           /></label
                         >
@@ -1016,13 +1069,19 @@
                       >
                         <label
                           class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
-                          ><span>{m.field_spikiness()}</span><input
+                          ><span
+                            ><OptionHelp
+                              label={m.field_spikiness()}
+                              help={m.help_spikiness()}
+                            /></span
+                          ><input
                             class="input w-16 text-right input-sm"
                             max="1"
                             min="0"
                             required
                             step="0.05"
                             type="number"
+                            aria-label={m.field_spikiness()}
                             bind:value={spikinessInput}
                           /></label
                         >
@@ -1032,7 +1091,8 @@
                       >
                         <label
                           class="label text-left whitespace-normal text-base-content"
-                          for="rng-seed-input">{m.field_seed()}</label
+                          for="rng-seed-input"
+                          ><OptionHelp label={m.field_seed()} help={m.help_seed()} /></label
                         >
                         <div class="join w-48 shrink-0" role="group" aria-label={m.field_seed()}>
                           <input
@@ -1047,6 +1107,7 @@
                             class:border-base-300={randomSeed}
                             class:border-2={!randomSeed}
                             class:input-primary={!randomSeed}
+                            aria-label={m.field_seed()}
                             bind:value={rngSeedInput}
                             onclick={() => (randomSeed = false)}
                           />

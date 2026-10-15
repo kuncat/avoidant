@@ -35,6 +35,14 @@ try {
   }
   await a.goto(`${harness.url}?actor=a`);
   await a.getByRole("button", { name: "New Game", exact: true }).click();
+  const help = a.getByRole("button", { name: "Help: Play mode", exact: true });
+  await a.waitForTimeout(1000);
+  await help.focus();
+  await a.keyboard.press("Tab");
+  await a.keyboard.press("Shift+Tab");
+  await a.waitForTimeout(350);
+  const tooltipId = await help.getAttribute("aria-describedby");
+  await a.waitForFunction((id) => document.getElementById(id).matches(":popover-open"), tooltipId);
   const mode = process.env.TEST_MODE ?? "territory";
   const modeLabels = {
     collaborative: "Collaborative Explore together",
@@ -45,10 +53,10 @@ try {
   assert.equal(await a.getByLabel("Player Name", { exact: true }).inputValue(), "a");
   await a.getByLabel("Player Name", { exact: true }).fill("Asha");
   const duration = a.getByLabel("Match duration", { exact: true });
-  await a.getByLabel("Duration unit").selectOption("hours");
+  await a.getByLabel("Duration unit", { exact: true }).selectOption("hours");
   assert.equal(await duration.getAttribute("max"), "24");
   await duration.fill("24");
-  await a.getByLabel("Duration unit").selectOption("minutes");
+  await a.getByLabel("Duration unit", { exact: true }).selectOption("minutes");
   assert.equal(await duration.getAttribute("max"), "1440");
   assert.equal(await duration.inputValue(), "1440");
   const mapNames = {
@@ -62,7 +70,7 @@ try {
     geodesicIcosphere: "Geodesic icosphere",
   };
   const maps = a.getByRole("group", { name: "Map", exact: true });
-  assert.equal(await maps.getByRole("button").count(), 8);
+  assert.equal(await maps.locator("button[aria-pressed]").count(), 8);
   await maps.getByRole("button", { name: "Cube", exact: true }).click();
   await maps
     .getByRole("button", {
@@ -76,11 +84,12 @@ try {
     .last()
     .waitFor();
   if (mode === "territory") {
-    await a.getByLabel("Claims must border existing territory").uncheck();
+    await a.getByLabel("Claims must border existing territory", { exact: true }).uncheck();
     await a.getByLabel("Turn-based", { exact: true }).check();
   }
-  await a.getByLabel("Additional flood cells").click();
-  await a.getByLabel("Additional flood cells").fill("3");
+  if (mode !== "collaborative") await a.getByLabel("Seconds per turn", { exact: true }).fill("300");
+  await a.getByLabel("Additional flood cells", { exact: true }).click();
+  await a.getByLabel("Additional flood cells", { exact: true }).fill("3");
   await a.getByRole("button", { name: "Infinite flood", exact: true }).click();
   assert.equal(
     await a
@@ -88,14 +97,16 @@ try {
       .getAttribute("aria-pressed"),
     "true",
   );
-  await a.getByLabel("Additional flood cells").click();
-  assert.equal(await a.getByLabel("Additional flood cells").inputValue(), "3");
-  await a.getByLabel("Additional flood cells").fill("0");
+  await a.getByLabel("Additional flood cells", { exact: true }).click();
+  assert.equal(await a.getByLabel("Additional flood cells", { exact: true }).inputValue(), "3");
+  await a.getByLabel("Additional flood cells", { exact: true }).fill("0");
   assert.equal(
-    await a.getByLabel("Additional flood cells").evaluate((el) => el.checkValidity()),
+    await a
+      .getByLabel("Additional flood cells", { exact: true })
+      .evaluate((el) => el.checkValidity()),
     false,
   );
-  await a.getByLabel("Additional flood cells").fill("3");
+  await a.getByLabel("Additional flood cells", { exact: true }).fill("3");
   assert.ok(
     await a
       .locator("#flood-limit")
@@ -213,7 +224,7 @@ try {
   await localized
     .getByRole("button", { name: "এলাকা দখল বোর্ডের এলাকা দখল করুন", exact: true })
     .click();
-  await localized.getByLabel("দখল করা ঘর নিজের এলাকার সংলগ্ন হতে হবে").waitFor();
+  await localized.getByLabel("দখল করা ঘর নিজের এলাকার সংলগ্ন হতে হবে", { exact: true }).waitFor();
   await localized.getByRole("button", { name: "অসীম উন্মোচন", exact: true }).click();
   assert.equal(
     await localized
