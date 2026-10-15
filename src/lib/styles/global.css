@@ -35,7 +35,12 @@ h1 {
   @apply rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700;
 }
 
+/* Keep the original Avoidant palette while using DaisyUI components. */
 .panel-wrapper {
+  --color-primary: var(--color-sky-600);
+  --color-primary-content: color-mix(in oklab, white 90%, transparent);
+  --color-secondary: var(--color-slate-200);
+  --color-secondary-content: color-mix(in oklab, var(--color-slate-700) 90%, transparent);
   @apply transition-all duration-500 ease-out;
 }
 
@@ -54,6 +59,10 @@ h1 {
 .panel-card {
   @apply overflow-y-auto overscroll-y-contain rounded bg-slate-300 px-6 text-center shadow-xl;
   max-height: calc(100dvh - 2rem);
+}
+
+.panel-card .panel-title {
+  @apply text-black;
 }
 
 .panel-header {
