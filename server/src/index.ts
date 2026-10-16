@@ -7,6 +7,7 @@ import { rules, type Result, type Snapshot } from "./rules";
 interface Env extends HistoryEnv {
   MATCHES: DurableObjectNamespace<MatchRoom>;
   INVITATIONS?: {
+    registerTV(session: string, claim: string, expires: number): Promise<{url: string}>;
     retire(session: string): Promise<void>;
     register(
       session: string,
@@ -112,7 +113,10 @@ export default {
         const paired = await env.MATCHES.get(env.MATCHES.idFromName(`tv:${id}`)).fetch(
           new Request("https://internal/tv-create", { method: "POST" }),
         );
-        return reply({ id, ...((await paired.json()) as object) }, paired.status);
+        const pair = await paired.json() as TVPair;
+        if (!paired.ok) return reply(pair, paired.status);
+        const invitation = await env.INVITATIONS?.registerTV(id, pair.claim, pair.expires);
+        return reply({ id, ...pair, invitationUrl: invitation?.url }, paired.status);
       }
       if (tv && uuid.test(tv[1]) && request.method === "GET") {
         const paired = await env.MATCHES.get(env.MATCHES.idFromName(`tv:${tv[1]}`)).fetch(

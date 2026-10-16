@@ -93,6 +93,11 @@ try {
     await tv.getByRole("button", { name: "Pan", exact: true }).getAttribute("aria-pressed"),
     "true",
   );
+  await tv.getByRole("button", { name: "Hide QR", exact: true }).click();
+  assert.equal(await tv.getByAltText("Join Avoidant on your phone").count(), 0);
+  await tv.keyboard.press("q");
+  await tv.getByAltText("Join Avoidant on your phone").waitFor();
+  await tv.getByRole("button", { name: "Hide QR", exact: true }).waitFor();
   await tv.screenshot({ path: "/tmp/avoidant-tv-after.png" });
   await tv.reload();
   if (packaged) await tv.getByRole("button", { name: "Avoidant", exact: true }).click();
