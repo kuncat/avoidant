@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { createServer, isIP } from "node:net";
-export async function startLocalMultiplayer({ lanHost, webPort = 5174, serverPort = 8799 } = {}) {
+export async function startLocalMultiplayer({
+  lanHost,
+  webPort = 5174,
+  serverPort = 8799,
+  games = false,
+} = {}) {
   if (lanHost && (isIP(lanHost) !== 4 || lanHost === "0.0.0.0")) {
     throw new Error("--host must be this machine's reachable IPv4 address (e.g. 192.168.1.20).");
   }
@@ -76,8 +81,17 @@ export async function startLocalMultiplayer({ lanHost, webPort = 5174, serverPor
         "--strictPort",
       ],
       {
-        cwd: root,
-        env: { ...process.env, VITE_LOCAL_COMPETITIVE_PORT: String(serverPort) },
+        cwd: games ? resolve(root, "../kuncat.com/games") : root,
+        env: {
+          ...process.env,
+          VITE_LOCAL_COMPETITIVE_PORT: String(serverPort),
+          ...(games
+            ? {
+                PUBLIC_KUNCAT_CLIENT_ID: "local-test",
+                PUBLIC_AVOIDANT_SERVER_URL: `http://127.0.0.1:${serverPort}`,
+              }
+            : {}),
+        },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );

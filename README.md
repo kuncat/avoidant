@@ -95,3 +95,16 @@ npm --prefix server test
 The shared menu uses DaisyUI 5 with Tailwind 4. Consumers of the Svelte package
 must install `daisyui` and enable its Tailwind plugin (themes `winter` and `night`),
 as configured in `src/app.css` and the sibling games site's stylesheet.
+
+## TV spectators
+
+`AvoidantSpectator` renders an existing match with a `SpectatorSession` capability.
+The Games launcher handles QR pairing and passes that session to the component.
+The server enforces read-only sockets independently of UI controls. Spectators
+receive the same redacted snapshot as players and do not consume player seats.
+`CompetitiveConfig.tvPair` links a phone-created match to a pending TV display.
+The normal game menu hides solo mode during this setup.
+
+With the Games dependencies installed, run `node server/tests/tv-browser.mjs` after
+building the server and updating the bundled website package to test a TV and two
+phones. This test uses only local test accounts, never production authentication.

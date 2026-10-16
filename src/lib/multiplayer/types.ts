@@ -12,7 +12,13 @@ export interface BoardState {
   elevationMax: number;
   queueExplorePulse(index: number, x: number, y: number, z: number): void;
 }
+export interface SpectatorSession {
+  id: string;
+  capability: string;
+  invitationUrl?: string;
+}
 export interface CompetitiveConfig {
+  tvPair?: { id: string; claim: string };
   serverUrl: string;
   account: {
     login(register?: boolean): Promise<void>;

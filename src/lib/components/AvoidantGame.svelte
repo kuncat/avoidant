@@ -95,6 +95,10 @@
           params.get("match") ??
           (params.has("state") ? sessionStorage.getItem("avoidant:competitiveMatch") : null);
         if (pending) sessionStorage.setItem("avoidant:competitiveMatch", pending);
+        if (config.tvPair) {
+          playMode = "collaborative";
+          setupMode = "host";
+        }
         await config.account.completeLogin();
         const current = await config.account.account();
         if (!active) return;
@@ -668,7 +672,7 @@
                 ><OptionHelp label={m.field_play_mode()} help={m.help_play_mode()} /></span
               >
               <div class="grid grid-cols-3 gap-2">
-                {#each playModes as mode (mode.id)}
+                {#each playModes.filter((mode) => !competitive?.tvPair || mode.id !== "solo") as mode (mode.id)}
                   <button
                     type="button"
                     class="btn h-auto min-h-28 flex-col gap-1 py-3 font-normal disabled:bg-base-200 disabled:text-base-content/60 disabled:opacity-100"

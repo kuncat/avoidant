@@ -421,3 +421,80 @@ test("completed times survive restart in private history", async () => {
     rmSync(persist, { recursive: true, force: true });
   }
 });
+
+test("TV pairing is one-use and spectators cannot occupy seats or play", async () => {
+  const mf = runtime();
+  try {
+    const pair = await (await post(mf, "/tv", {})).json();
+    const poll = (viewer) =>
+      mf.dispatchFetch(`https://game.example/tv/${pair.id}`, {
+        headers: { Origin: "https://games.example", Authorization: `TV ${viewer}` },
+      });
+    assert.equal((await poll("wrong")).status, 401);
+    assert.equal((await (await poll(pair.viewer)).json()).display, undefined);
+    const options = {
+      map: "small",
+      mode: "territory",
+      bordering: false,
+      turnBased: false,
+      floodLimit: 3,
+      tvPair: { id: pair.id, claim: pair.claim },
+    };
+    assert.equal(
+      (
+        await post(mf, "/matches", {
+          ...options,
+          tvPair: { id: pair.id, claim: crypto.randomUUID() },
+        })
+      ).status,
+      409,
+    );
+    assert.equal((await post(mf, "/matches", options, "invalid")).status, 401);
+    const created = await post(mf, "/matches", options);
+    assert.equal(created.status, 201);
+    const { id } = await created.json();
+    assert.equal((await post(mf, "/matches", options)).status, 409);
+    const { display } = await (await poll(pair.viewer)).json();
+    assert.equal(display.id, id);
+    const watch = (capability) =>
+      mf.dispatchFetch(`https://game.example/matches/${id}/watch`, {
+        method: "POST",
+        headers: { Origin: "https://games.example", Authorization: `Spectator ${capability}` },
+      });
+    assert.equal((await watch("wrong")).status, 401);
+    const { ticket } = await (await watch(display.capability)).json();
+    const upgrade = () =>
+      mf.dispatchFetch(`https://game.example/matches/${id}/socket?ticket=${ticket}`, {
+        headers: { Origin: "https://games.example", Upgrade: "websocket" },
+      });
+    const response = await upgrade();
+    assert.equal(response.status, 101);
+    assert.equal((await upgrade()).status, 401);
+    const tv = response.webSocket;
+    const messages = [];
+    tv.addEventListener("message", (e) => messages.push(JSON.parse(e.data)));
+    tv.accept();
+    const a = await connect(mf, id, "a", "Host");
+    const b = await connect(mf, id, "b", "Guest");
+    a.ws.send(JSON.stringify({ kind: "start" }));
+    const snapshot = (await a.next((m) => m.type === "snapshot" && m.snapshot.started)).snapshot;
+    assert.equal(snapshot.players.length, 2);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const viewed = messages.filter((m) => m.type === "snapshot").at(-1).snapshot;
+    assert.equal(viewed.players.length, 2);
+    assert.equal(viewed.started, true);
+    assert.ok(viewed.cells.filter((c) => !c.revealed).every((c) => c.isVoid === undefined));
+    const cell = snapshot.cells.findIndex((c) => !c.revealed);
+    a.ws.send(JSON.stringify({ kind: "move", sequence: 1, action: { kind: "select", cell } }));
+    const moved = (await a.next((m) => m.type === "snapshot" && m.snapshot.players[0].sequence === 1)).snapshot;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(messages.filter((m) => m.type === "snapshot").at(-1).snapshot.revision, moved.revision);
+    const closed = new Promise((resolve) => tv.addEventListener("close", resolve, { once: true }));
+    tv.send(JSON.stringify({ kind: "move", sequence: 1, action: { kind: "select", cell: 0 } }));
+    assert.equal((await closed).code, 1008);
+    a.ws.close();
+    b.ws.close();
+  } finally {
+    await mf.dispose();
+  }
+});

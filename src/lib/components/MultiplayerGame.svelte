@@ -22,6 +22,7 @@
     type MultiplayerSetup,
     type CompetitiveConfig,
     type MatchSnapshot,
+    type SpectatorSession,
   } from "$lib/multiplayer/types";
   import init, {
     type CellMetadataEntry,
@@ -30,12 +31,16 @@
   } from "$lib/wasm/avoidant_wasm";
   let {
     config,
+    spectator,
+    cameraPan = false,
     onexit,
     setup,
     invitation,
     playerName = $bindable(),
   }: {
     config: CompetitiveConfig;
+    spectator?: SpectatorSession;
+    cameraPan?: boolean;
     onexit: () => void;
     setup?: MultiplayerSetup;
     invitation?: string;
@@ -141,7 +146,8 @@
   }
   let myIndex = $derived(snapshot?.players.findIndex((p) => p.id === account?.id) ?? -1);
   let canPlay = $derived(
-    !!snapshot?.started &&
+    !spectator &&
+      !!snapshot?.started &&
       !snapshot.finished &&
       (snapshot.turn === null || snapshot.turn === myIndex),
   );
@@ -151,6 +157,11 @@
     void (async () => {
       try {
         await init();
+        if (spectator) {
+          matchId = spectator.id;
+          await join();
+          return;
+        }
         account = await config.account.account();
         if (account && invitation) {
           matchId = invitation;
@@ -224,8 +235,8 @@
     if (canPlay && player) client?.move(player.sequence + 1, { kind: "select", cell });
   }
   async function join() {
-    if (!account) return;
-    sessionStorage.setItem("avoidant:competitiveMatch", matchId);
+    if (!account && !spectator) return;
+    if (!spectator) sessionStorage.setItem("avoidant:competitiveMatch", matchId);
     client?.close();
     connectionGeneration++;
     copied = false;
@@ -237,7 +248,7 @@
     client = new MatchClient(
       config,
       matchId,
-      account.id,
+      account?.id ?? "",
       (s, m, n) => void receive(s, m, n),
       (m, reconnect) => {
         message = m;
@@ -248,12 +259,14 @@
       (url) => {
         invitationUrl = url;
       },
+      spectator?.capability,
     );
     const url = new SvelteURL(window.location.href);
     url.search = "";
     url.hash = "";
     url.searchParams.set("match", matchId);
     invitationUrl = url.toString();
+    if (!spectator) history.replaceState(null, "", url);
     await client.connect();
   }
   async function create() {
@@ -264,11 +277,16 @@
           Authorization: `Bearer ${await config.account.token()}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(setup),
+        body: JSON.stringify({ ...setup, tvPair: config.tvPair }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
       matchId = data.id;
+      if (config.tvPair) {
+        sessionStorage.removeItem("avoidant:tv-pair");
+        config.tvPair = undefined;
+        history.replaceState(null, "", location.pathname);
+      }
       await join();
     } catch (e) {
       message = String(e);
@@ -302,6 +320,13 @@
     <div class="panel-shell panel-header w-full max-w-full">
       <div class="flex flex-wrap items-center gap-3">
         <h1 class="panel-title text-lg font-semibold tracking-wide">Avoidant</h1>
+        {#if spectator && snapshot}
+          <div class="flex flex-wrap gap-4" aria-label="Player scores">
+            {#each snapshot.players as p, i (p.id)}<span style:color={PLAYER_COLORS[i]}
+                >{displayName(i)} · {p.score}</span
+              >{/each}
+          </div>
+        {/if}
         {#if snapshot?.started}
           {@const match = snapshot}
           <ScoreSummary>
@@ -314,7 +339,7 @@
                       .toLocaleString(getLocale()),
                   })}</strong
                 >
-              {:else}
+              {:else if !spectator}
                 {m.label_score()}:
                 <strong>{(player?.score ?? 0).toLocaleString(getLocale())}</strong>
               {/if}
@@ -396,7 +421,7 @@
       {#if message}
         <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
           <p role="status" class="text-amber-300">{message}</p>
-          {#if connectionIssue}
+          {#if connectionIssue && !spectator}
             <button class="btn btn-secondary" onclick={() => config.account.login()}
               >{m.action_login_again()}</button
             >
@@ -408,7 +433,7 @@
       {/if}
     </div>
   </div>
-  {#if !snapshot?.started}
+  {#if !snapshot?.started && !spectator}
     <div class="panel-wrapper panel-wrapper-card fixed inset-x-0 z-10 flex justify-center px-3">
       <div class="panel-shell panel-card w-full max-w-md space-y-4 py-6 text-slate-700">
         {#if !account}
@@ -497,7 +522,7 @@
           owners={snapshot?.cells.map((c) => c.owner) ?? []}
           showZeroCounts={snapshot?.options.floodLimit !== null}
         />
-        <MapControls {flat} radius={geometry.boundsRadius} />
+        <MapControls {flat} radius={geometry.boundsRadius} keyboard={!!spectator} pan={cameraPan} />
       </Canvas>
     </div>
   {/if}

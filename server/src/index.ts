@@ -18,7 +18,14 @@ interface Env extends HistoryEnv {
   ACCOUNT_API: string;
   REQUIRE_ENTITLEMENT: string;
 }
+interface TVPair {
+  claim: string;
+  viewer: string;
+  expires: number;
+  display?: { id: string; capability: string; invitationUrl?: string };
+}
 interface Saved {
+  spectator?: string;
   state: string;
   snapshot: Snapshot;
   map: keyof typeof catalog;
@@ -33,6 +40,7 @@ interface Saved {
   cleanupAt?: number;
 }
 interface Attachment {
+  readOnly?: boolean;
   actor: string;
   expires: number;
   window: number;
@@ -87,9 +95,29 @@ export default {
     let response: Response;
     try {
       const url = new URL(request.url);
+      const tv = /^\/tv\/([a-f0-9-]{36})$/.exec(url.pathname);
+      if (url.pathname === "/tv" && request.method === "POST") {
+        const quota = await env.MATCHES.get(
+          env.MATCHES.idFromName(`tv-quota:${request.headers.get("CF-Connecting-IP") ?? origin}`),
+        ).fetch(new Request("https://internal/quota", { method: "POST" }));
+        if (!quota.ok) return reply({ error: "Too many pairing requests" }, 429);
+        const id = crypto.randomUUID();
+        const paired = await env.MATCHES.get(env.MATCHES.idFromName(`tv:${id}`)).fetch(
+          new Request("https://internal/tv-create", { method: "POST" }),
+        );
+        return reply({ id, ...((await paired.json()) as object) }, paired.status);
+      }
+      if (tv && uuid.test(tv[1]) && request.method === "GET") {
+        const paired = await env.MATCHES.get(env.MATCHES.idFromName(`tv:${tv[1]}`)).fetch(
+          new Request("https://internal/tv-poll", {
+            headers: { Authorization: request.headers.get("Authorization") ?? "" },
+          }),
+        );
+        return reply(await paired.json(), paired.status);
+      }
       const historyPath =
         /^\/history\/([a-f0-9-]{36})\/(replay|initial|engines\/([a-f0-9]{64}))$/.exec(url.pathname);
-      const match = /^\/matches\/([^/]+)(?:\/(connect|socket))?$/.exec(url.pathname);
+      const match = /^\/matches\/([^/]+)(?:\/(connect|socket|watch))?$/.exec(url.pathname);
       if (match && match[2] === "connect" && /^[A-Za-z]{4,32}$/.test(match[1])) {
         const resolved = await env.INVITATIONS?.resolve(match[1].toUpperCase());
         if (!resolved) return reply({ error: "Invitation not found" }, 404);
@@ -98,6 +126,15 @@ export default {
       if (match && uuid.test(match[1]) && match[2] === "socket" && request.method === "GET") {
         // The room consumes a short-lived single-use ticket; never put bearer tokens in URLs.
         return await env.MATCHES.get(env.MATCHES.idFromName(match[1])).fetch(request);
+      }
+      if (match && uuid.test(match[1]) && match[2] === "watch" && request.method === "POST") {
+        const watched = await env.MATCHES.get(env.MATCHES.idFromName(match[1])).fetch(
+          new Request("https://internal/watch", {
+            method: "POST",
+            headers: { Authorization: request.headers.get("Authorization") ?? "" },
+          }),
+        );
+        return reply(await watched.json(), watched.status);
       }
       if (
         !(
@@ -200,6 +237,19 @@ export default {
           )
         )
           return reply({ error: "Invalid match options" }, 400);
+        if (input.tvPair) {
+          if (!uuid.test(input.tvPair.id) || !uuid.test(input.tvPair.claim))
+            return reply({ error: "Invalid TV pairing" }, 400);
+          const valid = await env.MATCHES.get(
+            env.MATCHES.idFromName(`tv:${input.tvPair.id}`),
+          ).fetch(
+            new Request("https://internal/tv-validate", {
+              method: "POST",
+              body: JSON.stringify({ claim: input.tvPair.claim }),
+            }),
+          );
+          if (!valid.ok) return reply({ error: "TV pairing expired or already used" }, 409);
+        }
         const id = crypto.randomUUID();
         response = await env.MATCHES.get(env.MATCHES.idFromName(id)).fetch(
           new Request("https://internal/create", {
@@ -208,11 +258,27 @@ export default {
           }),
         );
         if (response.ok) {
+          const created = (await response.json()) as { capability: string };
           const invitation = await env.INVITATIONS?.register(id, {
             map: input.map,
             mode: input.mode,
             bordering: input.bordering,
           });
+          if (input.tvPair) {
+            const attached = await env.MATCHES.get(
+              env.MATCHES.idFromName(`tv:${input.tvPair.id}`),
+            ).fetch(
+              new Request("https://internal/tv-attach", {
+                method: "POST",
+                body: JSON.stringify({
+                  claim: input.tvPair.claim,
+                  display: { id, capability: created.capability, invitationUrl: invitation?.url },
+                }),
+              }),
+            );
+            if (!attached.ok)
+              return reply({ error: "TV pairing expired or already used; try again" }, 409);
+          }
           response = reply({ id, code: invitation?.code, invitationUrl: invitation?.url }, 201);
         }
       } else {
@@ -410,6 +476,35 @@ export class MatchRoom extends DurableObject<Env> {
         await this.ctx.storage.setAlarm(quota.start + 3600_000);
         return json({ ok: true });
       }
+      if (url.pathname === "/tv-create") {
+        const pair: TVPair = {
+          claim: crypto.randomUUID(),
+          viewer: crypto.randomUUID(),
+          expires: Date.now() + 10 * 60_000,
+        };
+        await this.ctx.storage.put("tv-pair", pair);
+        await this.ctx.storage.setAlarm(pair.expires);
+        return json(pair, 201);
+      }
+      if (url.pathname.startsWith("/tv-")) {
+        const pair = await this.ctx.storage.get<TVPair>("tv-pair");
+        if (!pair || pair.expires < Date.now()) return json({ error: "TV pairing expired" }, 410);
+        if (url.pathname === "/tv-poll") {
+          if (request.headers.get("Authorization") !== `TV ${pair.viewer}`)
+            return json({ error: "Invalid TV session" }, 401);
+          return json({ expires: pair.expires, display: pair.display });
+        }
+        const input = (await request.json()) as { claim: string; display?: TVPair["display"] };
+        if (input.claim !== pair.claim || pair.display)
+          return json({ error: "Invalid or used pairing" }, 409);
+        if (url.pathname === "/tv-attach" && input.display) {
+          pair.display = input.display;
+          pair.expires = Date.now() + 24 * 3600_000;
+          await this.ctx.storage.put("tv-pair", pair);
+          await this.ctx.storage.setAlarm(pair.expires);
+        }
+        return json({ ok: true });
+      }
       if (url.pathname === "/create") {
         if (this.saved) return json({ error: "Already created" }, 409);
         const input = (await request.json()) as {
@@ -442,6 +537,7 @@ export class MatchRoom extends DurableObject<Env> {
           },
         });
         this.saved = {
+          spectator: crypto.randomUUID(),
           state: result.state,
           snapshot: result.snapshot,
           map: input.map,
@@ -459,9 +555,31 @@ export class MatchRoom extends DurableObject<Env> {
         if (!(await this.environment.REPLAYS.head(`engines/${engineHash}.json`)))
           await this.environment.REPLAYS.put(`engines/${engineHash}.json`, engineBundle);
         await this.persist(result);
-        return json({ ok: true });
+        return json({ capability: this.saved.spectator });
       }
       if (!this.saved) return json({ error: "Match not found" }, 404);
+      if (url.pathname === "/watch") {
+        if (
+          !this.saved.spectator ||
+          request.headers.get("Authorization") !== `Spectator ${this.saved.spectator}`
+        )
+          return json({ error: "Invalid display capability" }, 401);
+        const tickets = await this.ctx.storage.list<{ expires: number }>({ prefix: "ticket:" });
+        let pending = 0;
+        for (const [key, value] of tickets) {
+          if (value.expires < Date.now()) await this.ctx.storage.delete(key);
+          else pending++;
+        }
+        if (pending >= 32) return json({ error: "Too many pending connections" }, 429);
+        const ticket = crypto.randomUUID();
+        await this.ctx.storage.put(`ticket:${ticket}`, {
+          actor: "",
+          readOnly: true,
+          authExpires: Date.now() + 24 * 3600_000,
+          expires: Date.now() + 30_000,
+        });
+        return json({ ticket });
+      }
       if (url.pathname === "/connect") {
         const { actor, authExpires, name } = (await request.json()) as {
           actor: string;
@@ -509,6 +627,7 @@ export class MatchRoom extends DurableObject<Env> {
           actor: string;
           expires: number;
           authExpires: number;
+          readOnly?: boolean;
         }>(`ticket:${ticket}`);
         await this.ctx.storage.delete(`ticket:${ticket}`);
         if (!entry || entry.expires < Date.now()) return json({ error: "Ticket expired" }, 401);
@@ -518,6 +637,7 @@ export class MatchRoom extends DurableObject<Env> {
         this.ctx.acceptWebSocket(pair[1]);
         pair[1].serializeAttachment({
           actor: entry.actor,
+          readOnly: entry.readOnly,
           expires: Math.min(entry.authExpires, Date.now() + 15 * 60_000),
           window: Date.now(),
           messages: 0,
@@ -540,6 +660,10 @@ export class MatchRoom extends DurableObject<Env> {
       const a = ws.deserializeAttachment() as Attachment;
       if (!this.saved || Date.now() > a.expires) {
         ws.close(4001, "Reconnect to authenticate");
+        return;
+      }
+      if (a.readOnly) {
+        ws.close(1008, "Display is read-only");
         return;
       }
       if (typeof message !== "string" || message.length > 512) {

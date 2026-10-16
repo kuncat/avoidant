@@ -3,7 +3,12 @@
   import { PerspectiveCamera, Raycaster, Vector2 } from "three";
   import { cameraPlanePoint, orbitMap, orbitRadiansPerPixel, panMap, zoomMap } from "./map-camera";
 
-  let { flat, radius }: { flat: boolean; radius: number } = $props();
+  let {
+    flat,
+    radius,
+    keyboard = false,
+    pan: keyboardPan = false,
+  }: { flat: boolean; radius: number; keyboard?: boolean; pan?: boolean } = $props();
   const { camera, renderer, scene, invalidate } = useThrelte();
 
   $effect(() => {
@@ -11,6 +16,7 @@
     if (!(selectedCamera instanceof PerspectiveCamera)) return;
     const activeCamera: PerspectiveCamera = selectedCamera;
     const isFlat = flat;
+    const enableKeyboard = keyboard;
     const mapRadius = Math.max(1, radius);
     const element = renderer.domElement;
     // Gesture bookkeeping is deliberately non-reactive.
@@ -130,9 +136,28 @@
       if (suppressClick) event.stopImmediatePropagation();
     }
 
+    function key(event: KeyboardEvent) {
+      if (!enableKeyboard || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("input,select,textarea,button,a")
+      )
+        return;
+      const dx = event.key === "ArrowLeft" ? -24 : event.key === "ArrowRight" ? 24 : 0;
+      const dy = event.key === "ArrowUp" ? -24 : event.key === "ArrowDown" ? 24 : 0;
+      if (!dx && !dy) return;
+      event.preventDefault();
+      if (keyboardPan || event.shiftKey) {
+        const rect = element.getBoundingClientRect();
+        const x = rect.left + rect.width / 2,
+          y = rect.top + rect.height / 2;
+        pan(x, y, x + dx, y + dy);
+      } else rotate(dx, dy);
+    }
     function contextMenu(event: MouseEvent) {
       event.preventDefault();
     }
+    window.addEventListener("keydown", key);
     element.addEventListener("click", click, true);
     element.addEventListener("pointerdown", down);
     element.addEventListener("pointermove", move);
@@ -142,6 +167,7 @@
     element.addEventListener("wheel", wheel, { passive: false });
     element.addEventListener("contextmenu", contextMenu);
     return () => {
+      window.removeEventListener("keydown", key);
       element.removeEventListener("click", click, true);
       element.removeEventListener("pointerdown", down);
       element.removeEventListener("pointermove", move);
