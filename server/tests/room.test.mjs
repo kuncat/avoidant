@@ -71,7 +71,11 @@ async function post(mf, path, body, actor = "a") {
 async function connect(mf, id, actor, name) {
   const res = await post(mf, `/matches/${id}/connect`, { name }, actor);
   assert.equal(res.status, 200);
-  const { ticket } = await res.json();
+  const { ticket, preview } = await res.json();
+  assert.deepEqual(Object.keys(preview).sort(), ["bordering", "map", "mode"]);
+  assert.equal(typeof preview.map, "string");
+  assert.ok(["collaborative", "territory"].includes(preview.mode));
+  assert.equal(typeof preview.bordering, "boolean");
   const upgrade = await mf.dispatchFetch(
     `https://game.example/matches/${id}/socket?ticket=${ticket}`,
     { headers: { Origin: "https://games.example", Upgrade: "websocket" } },

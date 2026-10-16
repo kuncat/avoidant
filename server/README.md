@@ -161,3 +161,23 @@ notifications retain a durable retry marker. The registry returns 404 for retire
 links and permits reassignment only after a further 48 hours. Active matches are
 never retired merely because a redirect or registry request failed. Local
 harnesses without the binding keep their UUID URLs.
+
+### Chat previews
+
+Admission registers only the public map preset, mode, and bordering setting with
+kuga.run. Reconnecting also updates an existing invitation's settings; legacy
+links use a generic map card until then. Preview requests never enter the game
+room or read hidden voids or player identities.
+
+To regenerate the committed PNG cards in the sibling infra repo:
+
+```sh
+npm run build:wasm
+node server/tools/share-previews.mjs
+```
+
+The generator uses the real seeded map polygons, plus the games site's Karrom
+canvas renderer, and requires Playwright Chromium and installed server build
+tools. Its optional arguments are the output directory and Karrom `board.ts`
+path. Change the asset version directory and image URL prefix together when
+replacing published artwork, since images are immutable-cacheable.

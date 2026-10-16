@@ -8,7 +8,10 @@ interface Env extends HistoryEnv {
   MATCHES: DurableObjectNamespace<MatchRoom>;
   INVITATIONS?: {
     retire(session: string): Promise<void>;
-    register(session: string): Promise<{ code: string; url: string }>;
+    register(
+      session: string,
+      preview?: { map: string; mode: "collaborative" | "territory"; bordering: boolean },
+    ): Promise<{ code: string; url: string }>;
     resolve(code: string): Promise<{ session: string } | null>;
   };
   ALLOWED_ORIGINS: string;
@@ -205,7 +208,11 @@ export default {
           }),
         );
         if (response.ok) {
-          const invitation = await env.INVITATIONS?.register(id);
+          const invitation = await env.INVITATIONS?.register(id, {
+            map: input.map,
+            mode: input.mode,
+            bordering: input.bordering,
+          });
           response = reply({ id, code: invitation?.code, invitationUrl: invitation?.url }, 201);
         }
       } else {
@@ -231,8 +238,11 @@ export default {
           }),
         );
         if (response.ok) {
-          const data = (await response.json()) as { ticket: string };
-          const invitation = await env.INVITATIONS?.register(match![1]);
+          const data = (await response.json()) as {
+            ticket: string;
+            preview: { map: string; mode: "collaborative" | "territory"; bordering: boolean };
+          };
+          const invitation = await env.INVITATIONS?.register(match![1], data.preview);
           response = reply({ ...data, id: match![1], invitationUrl: invitation?.url });
         }
       }
@@ -480,7 +490,14 @@ export class MatchRoom extends DurableObject<Env> {
           expires: Date.now() + 30_000,
         });
         this.broadcast();
-        return json({ ticket });
+        return json({
+          ticket,
+          preview: {
+            map: this.saved.map,
+            mode: this.saved.snapshot.options.mode,
+            bordering: this.saved.snapshot.options.bordering,
+          },
+        });
       }
       if (
         url.pathname.endsWith("/socket") &&
