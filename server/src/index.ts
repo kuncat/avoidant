@@ -6,6 +6,11 @@ import { rules, type Result, type Snapshot } from "./rules";
 
 interface Env extends HistoryEnv {
   MATCHES: DurableObjectNamespace<MatchRoom>;
+  INVITATIONS?: {
+    retire(session: string): Promise<void>;
+    register(session: string): Promise<{ code: string; url: string }>;
+    resolve(code: string): Promise<{ session: string } | null>;
+  };
   ALLOWED_ORIGINS: string;
   ACCOUNT_API: string;
   REQUIRE_ENTITLEMENT: string;
@@ -82,6 +87,11 @@ export default {
       const historyPath =
         /^\/history\/([a-f0-9-]{36})\/(replay|initial|engines\/([a-f0-9]{64}))$/.exec(url.pathname);
       const match = /^\/matches\/([^/]+)(?:\/(connect|socket))?$/.exec(url.pathname);
+      if (match && match[2] === "connect" && /^[A-Za-z]{4,32}$/.test(match[1])) {
+        const resolved = await env.INVITATIONS?.resolve(match[1].toUpperCase());
+        if (!resolved) return reply({ error: "Invitation not found" }, 404);
+        match[1] = resolved.session;
+      }
       if (match && uuid.test(match[1]) && match[2] === "socket" && request.method === "GET") {
         // The room consumes a short-lived single-use ticket; never put bearer tokens in URLs.
         return await env.MATCHES.get(env.MATCHES.idFromName(match[1])).fetch(request);
@@ -194,7 +204,10 @@ export default {
             body: JSON.stringify({ ...input, actor: account.id, id }),
           }),
         );
-        if (response.ok) response = reply({ id }, 201);
+        if (response.ok) {
+          const invitation = await env.INVITATIONS?.register(id);
+          response = reply({ id, code: invitation?.code, invitationUrl: invitation?.url }, 201);
+        }
       } else {
         const raw = await boundedBody(request, 2048);
         if (raw === null) return reply({ error: "Request too large" }, 413);
@@ -217,6 +230,11 @@ export default {
             }),
           }),
         );
+        if (response.ok) {
+          const data = (await response.json()) as { ticket: string };
+          const invitation = await env.INVITATIONS?.register(match![1]);
+          response = reply({ ...data, id: match![1], invitationUrl: invitation?.url });
+        }
       }
     } catch {
       response = reply({ error: "Request could not be completed" }, 400);
@@ -564,8 +582,17 @@ export class MatchRoom extends DurableObject<Env> {
         }
         for (const ws of this.ctx.getWebSockets())
           ws.close(1000, this.saved?.snapshot.finished ? "Match complete" : "Match expired");
+        const retiring = this.saved?.id ?? (await this.ctx.storage.get<string>("retiring"));
+        if (retiring) await this.ctx.storage.put("retiring", retiring);
         this.saved = undefined;
-        await this.ctx.storage.deleteAll();
+        await this.ctx.storage.delete("match");
+        try {
+          if (retiring) await this.environment.INVITATIONS?.retire(retiring);
+          await this.ctx.storage.deleteAll();
+        } catch {
+          // Keep the code reserved until cleanup notification succeeds.
+          await this.ctx.storage.setAlarm(Date.now() + 60_000);
+        }
         return;
       }
       const command = { kind: "tick", now: Date.now() };

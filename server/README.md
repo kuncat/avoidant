@@ -146,3 +146,18 @@ contain the selected cell and server time, and each command references the
 archived rules engine hash. Relocation uses no new randomness, so replay applies
 the same swap. Archived engine bundles preserve historical rules across future
 deployments; initial-state and replay endpoints remain participant-only.
+
+## Shared invitation URLs
+
+Production binds `INVITATIONS` to the `AvoidantInvitations` entrypoint of the
+`kuncat-invitations` Worker managed in `infra/platform/multiplayer`. Creating or
+joining a room returns its `https://kuga.run/ABCDE` URL. Join accepts a bare code,
+a kuga.run URL, or an existing UUID invitation; internal match IDs remain UUIDs.
+The global registry allocates five-letter codes across both games and supports
+4–32-letter inputs for future growth. It is not on the gameplay message path.
+
+Room cleanup removes playable state before retiring its mapping. Failed registry
+notifications retain a durable retry marker. The registry returns 404 for retired
+links and permits reassignment only after a further 48 hours. Active matches are
+never retired merely because a redirect or registry request failed. Local
+harnesses without the binding keep their UUID URLs.

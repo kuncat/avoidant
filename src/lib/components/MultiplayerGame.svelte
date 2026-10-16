@@ -245,6 +245,9 @@
         savingName = false;
       },
       () => playerName,
+      (url) => {
+        invitationUrl = url;
+      },
     );
     const url = new SvelteURL(window.location.href);
     url.search = "";

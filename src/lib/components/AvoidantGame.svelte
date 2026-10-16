@@ -6,6 +6,7 @@
   import GameHistory from "./GameHistory.svelte";
   let historyOpen = $state(false);
   import MultiplayerGame from "./MultiplayerGame.svelte";
+  import { parseInvitation } from "../multiplayer/invitations";
   import type { CompetitiveConfig, MultiplayerSetup } from "$lib/multiplayer/types";
   import { devicePixelRatio } from "svelte/reactivity/window";
   import { slide } from "svelte/transition";
@@ -495,8 +496,8 @@
     }
     try {
       const input = ticketInput.trim();
-      const id = /^https?:\/\//i.test(input) ? new URL(input).searchParams.get("match") : input;
-      if (!id || !/^[a-f0-9-]{36}$/.test(id)) throw new Error(m.error_invitation_invalid());
+      const id = parseInvitation(input);
+      if (!id) throw new Error(m.error_invitation_invalid());
       invitation = id;
       multiplayerSetup = undefined;
       competitiveOpen = true;

@@ -19,6 +19,7 @@ test("finished room cleanup cannot be extended by repeated persistence", async (
     closed = false;
   const storage = {
     get: async () => undefined,
+    delete: async () => {},
     put: async () => {},
     setAlarm: async (value) => {
       alarm = value;
@@ -63,6 +64,7 @@ test("history failures retain state and schedule a retry without keeping sockets
   const ctx = {
     storage: {
       get: async () => undefined,
+      delete: async () => {},
       setAlarm: async (value) => {
         alarm = value;
       },
@@ -92,4 +94,43 @@ test("history failures retain state and schedule a retry without keeping sockets
   room.archive = async () => {};
   await room.alarm();
   assert.equal(deleted, true);
+});
+
+test("retirement retries preserve the ID after playable state is removed", async () => {
+  const data = new Map();
+  let alarm = 0,
+    calls = 0;
+  const id = crypto.randomUUID();
+  const ctx = {
+    storage: {
+      get: async (key) => data.get(key),
+      put: async (key, value) => data.set(key, value),
+      delete: async (key) => data.delete(key),
+      deleteAll: async () => data.clear(),
+      setAlarm: async (value) => {
+        alarm = value;
+      },
+    },
+    blockConcurrencyWhile: (fn) => fn(),
+    getWebSockets: () => [],
+  };
+  const room = new MatchRoom(ctx, {
+    INVITATIONS: {
+      retire: async (session) => {
+        assert.equal(session, id);
+        assert.equal(data.has("match"), false);
+        if (++calls === 1) throw Error("Registry offline");
+      },
+    },
+  });
+  await Promise.resolve();
+  room.saved = { id, snapshot: { started: false } };
+  data.set("match", room.saved);
+  await room.alarm();
+  assert.equal(room.saved, undefined);
+  assert.equal(data.get("retiring"), id);
+  assert.ok(alarm > Date.now());
+  await room.alarm();
+  assert.equal(calls, 2);
+  assert.equal(data.size, 0);
 });

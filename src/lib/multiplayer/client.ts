@@ -10,11 +10,12 @@ export class MatchClient {
   private retryCount = 0;
   constructor(
     private config: CompetitiveConfig,
-    readonly id: string,
+    public id: string,
     private actor: string,
     private receive: (s: MatchSnapshot, map: string, neighbors: number[][]) => void,
     private report: (s: string, reconnect?: boolean) => void,
     private playerName: () => string,
+    private invitationReceived?: (url: string) => void,
   ) {}
   async connect() {
     clearTimeout(this.retry);
@@ -39,6 +40,8 @@ export class MatchClient {
             : (data.error ?? m.error_match_join()),
         );
       if (this.stopped) return;
+      if (data.id) this.id = data.id;
+      if (data.invitationUrl) this.invitationReceived?.(data.invitationUrl);
       const url = new URL(`${this.config.serverUrl}/matches/${this.id}/socket`);
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
       url.searchParams.set("ticket", data.ticket);
