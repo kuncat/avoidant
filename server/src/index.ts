@@ -81,7 +81,14 @@ async function boundedBody(request: Request, limit: number): Promise<string | nu
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const origin = request.headers.get("Origin") ?? "";
-    if (!env.ALLOWED_ORIGINS.split(",").includes(origin))
+    // Packaged webOS apps have an opaque origin. Only capability-authenticated
+    // display endpoints (and initial pairing) accept it; account/player APIs do not.
+    const displayPath = new URL(request.url).pathname;
+    const packagedDisplay = origin === "null" && (
+      /^\/tv(?:\/[a-f0-9-]{36})?$/.test(displayPath) ||
+      /^\/matches\/[a-f0-9-]{36}\/(watch|socket)$/.test(displayPath)
+    );
+    if (!packagedDisplay && !env.ALLOWED_ORIGINS.split(",").includes(origin))
       return json({ error: "Origin not allowed" }, 403);
     const cors = {
       "Access-Control-Allow-Origin": origin,

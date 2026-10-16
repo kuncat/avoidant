@@ -422,13 +422,21 @@ test("completed times survive restart in private history", async () => {
   }
 });
 
-test("TV pairing is one-use and spectators cannot occupy seats or play", async () => {
+for (const displayOrigin of ["https://games.example", "null"]) test(`TV pairing is one-use and spectators cannot occupy seats or play (${displayOrigin})`, async () => {
   const mf = runtime();
   try {
-    const pair = await (await post(mf, "/tv", {})).json();
+    assert.equal((await mf.dispatchFetch("https://game.example/matches", {
+      method: "POST", headers: { Origin: "null" },
+    })).status, 403);
+    const pairResponse = await mf.dispatchFetch("https://game.example/tv", {
+      method: "POST", headers: { Origin: displayOrigin },
+    });
+    assert.equal(pairResponse.status, 201);
+    assert.equal(pairResponse.headers.get("Access-Control-Allow-Origin"), displayOrigin);
+    const pair = await pairResponse.json();
     const poll = (viewer) =>
       mf.dispatchFetch(`https://game.example/tv/${pair.id}`, {
-        headers: { Origin: "https://games.example", Authorization: `TV ${viewer}` },
+        headers: { Origin: displayOrigin, Authorization: `TV ${viewer}` },
       });
     assert.equal((await poll("wrong")).status, 401);
     assert.equal((await (await poll(pair.viewer)).json()).display, undefined);
@@ -459,13 +467,13 @@ test("TV pairing is one-use and spectators cannot occupy seats or play", async (
     const watch = (capability) =>
       mf.dispatchFetch(`https://game.example/matches/${id}/watch`, {
         method: "POST",
-        headers: { Origin: "https://games.example", Authorization: `Spectator ${capability}` },
+        headers: { Origin: displayOrigin, Authorization: `Spectator ${capability}` },
       });
     assert.equal((await watch("wrong")).status, 401);
     const { ticket } = await (await watch(display.capability)).json();
     const upgrade = () =>
       mf.dispatchFetch(`https://game.example/matches/${id}/socket?ticket=${ticket}`, {
-        headers: { Origin: "https://games.example", Upgrade: "websocket" },
+        headers: { Origin: displayOrigin, Upgrade: "websocket" },
       });
     const response = await upgrade();
     assert.equal(response.status, 101);
