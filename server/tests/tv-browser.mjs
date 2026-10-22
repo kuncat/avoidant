@@ -16,12 +16,12 @@ try {
   const tv = await context.newPage();
   tv.on("pageerror", (e) => { errors.push(e.message); console.error(e.message); });
   if (packaged) {
-    await context.route("https://multiplayer.games.kuncat.com/**", async route => {
-      const response = await route.fetch({ url: route.request().url().replace("https://multiplayer.games.kuncat.com", "http://127.0.0.1:8797"), headers: { ...route.request().headers(), origin: "null" } });
+    await context.route("https://avoidant.multiplayer.games.kuncat.com/**", async route => {
+      const response = await route.fetch({ url: route.request().url().replace("https://avoidant.multiplayer.games.kuncat.com", "http://127.0.0.1:8797"), headers: { ...route.request().headers(), origin: "null" } });
       await route.fulfill({ response, headers: { ...response.headers(), "access-control-allow-origin": fileOrigin ? "null" : "https://games.kuncat.com" } });
     });
-    await context.routeWebSocket("wss://multiplayer.games.kuncat.com/**", ws => {
-      const server = new WebSocket(ws.url().replace("wss://multiplayer.games.kuncat.com", "ws://127.0.0.1:8797"), { origin: "null" });
+    await context.routeWebSocket("wss://avoidant.multiplayer.games.kuncat.com/**", ws => {
+      const server = new WebSocket(ws.url().replace("wss://avoidant.multiplayer.games.kuncat.com", "ws://127.0.0.1:8797"), { origin: "null" });
       server.on("message", data => ws.send(data.toString()));
       server.on("close", () => ws.close());
       server.on("error", e => errors.push(e.message));

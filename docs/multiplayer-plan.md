@@ -439,7 +439,7 @@ set `KUNCAT_ACCESS_TOKEN` (and `KUNCAT_ORIGIN` if testing a different allowed or
 then run from `server/`:
 
 ```sh
-node scripts/replay.mjs https://multiplayer.games.kuncat.com MATCH_UUID
+node scripts/replay.mjs https://avoidant.multiplayer.games.kuncat.com MATCH_UUID
 ```
 
 The tool verifies engine hashes, applies each command using its archived engine,
