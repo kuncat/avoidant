@@ -119,6 +119,8 @@
   "action_register": "নিবন্ধন করুন",
   "action_logout": "লগ আউট করুন",
   "text_multiplayer_login": "বহুজন খেলার ধরন চালু করতে লগ ইন করুন।",
+  "text_multiplayer_subscription": "বহুজন খেলা হোস্ট করতে Games সাবস্ক্রিপশন লাগবে। খেলায় যোগ দেওয়া বিনামূল্যে।",
+  "action_see_plans": "প্ল্যান দেখুন",
   "field_bordering": "দখল করা ঘর নিজের এলাকার সংলগ্ন হতে হবে",
   "field_turn_based": "পালা করে খেলা",
   "field_flood_limit": "একসঙ্গে ঘর উন্মোচনের সীমা",

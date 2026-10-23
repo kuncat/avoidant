@@ -128,6 +128,8 @@
   "action_register": "Register",
   "action_logout": "Log out",
   "text_multiplayer_login": "Log in to enable multiplayer modes.",
+  "text_multiplayer_subscription": "Hosting multiplayer needs a Games subscription. Joining games is free.",
+  "action_see_plans": "See plans",
   "field_bordering": "Claims must border existing territory",
   "field_turn_based": "Turn-based",
   "field_flood_limit": "Flood limit",

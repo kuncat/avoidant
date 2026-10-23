@@ -61,11 +61,16 @@
   type Locale = (typeof locales)[number];
   type AvoidantGameProps = {
     competitive?: CompetitiveConfig;
+    accountClient?: CompetitiveConfig["account"];
+    plansUrl?: string;
   };
 
-  let { competitive }: AvoidantGameProps = $props();
+  let { competitive, accountClient, plansUrl = "https://games.kuncat.com/?subscription=choose" }: AvoidantGameProps = $props();
+  const authentication = $derived(accountClient ?? competitive?.account);
   let competitiveOpen = $state(false);
   let account = $state<{ id: string; capabilities: string[] } | null>(null);
+  // Hosting multiplayer is a Kuncat Games subscription feature; joining stays free.
+  const canHost = $derived(!!account?.capabilities?.includes("games:host"));
   let authMessage = $state("");
   let playMode = $state<"solo" | MultiplayerSetup["mode"]>("solo");
   let multiplayerSetup = $state<MultiplayerSetup>();
@@ -86,7 +91,8 @@
   ] as const;
   $effect(() => {
     const config = competitive;
-    if (!config) return;
+    const auth = authentication;
+    if (!auth) return;
     let active = true;
     void (async () => {
       try {
@@ -95,12 +101,12 @@
           params.get("match") ??
           (params.has("state") ? sessionStorage.getItem("avoidant:competitiveMatch") : null);
         if (pending) sessionStorage.setItem("avoidant:competitiveMatch", pending);
-        if (config.tvPair) {
+        if (config?.tvPair) {
           playMode = "collaborative";
           setupMode = "host";
         }
-        await config.account.completeLogin();
-        const current = await config.account.account();
+        await auth.completeLogin();
+        const current = await auth.account();
         if (!active) return;
         account = current;
         if (
@@ -113,7 +119,7 @@
         if (pending) {
           invitation = pending;
           ticketInput = pending;
-          if (current) competitiveOpen = true;
+          if (current && config) competitiveOpen = true;
           else setupMode = "join";
         }
       } catch (error) {
@@ -126,14 +132,14 @@
   });
   async function login(register = false) {
     try {
-      await competitive?.account.login(register);
+      await authentication?.login(register);
     } catch (error) {
       authMessage = String(error);
     }
   }
   async function logout() {
     try {
-      await competitive?.account.logout();
+      await authentication?.logout();
       account = null;
       playMode = "solo";
     } catch (error) {
@@ -637,16 +643,19 @@
 
     {#if !gameState}
       <div class="my-3 flex flex-wrap justify-center gap-2">
-        {#if account}<button class="btn btn-secondary btn-sm" onclick={() => (historyOpen = true)}
-            >{m.action_game_history()}</button
-          ><button class="btn btn-secondary btn-sm" onclick={logout}>{m.action_logout()}</button>
+        {#if account}{#if competitive}<button
+              class="btn btn-secondary btn-sm"
+              onclick={() => (historyOpen = true)}>{m.action_game_history()}</button
+            >{/if}<button class="btn btn-secondary btn-sm" onclick={logout}
+            >{m.action_logout()}</button
+          >
         {:else}<button
             class="btn btn-secondary btn-sm"
-            disabled={!competitive}
+            disabled={!authentication}
             onclick={() => login()}>{m.action_login()}</button
           ><button
             class="btn btn-secondary btn-sm"
-            disabled={!competitive}
+            disabled={!authentication}
             onclick={() => login(true)}>{m.action_register()}</button
           >{/if}
       </div>
@@ -678,7 +687,7 @@
                     class="btn h-auto min-h-28 flex-col gap-1 py-3 font-normal disabled:bg-base-200 disabled:text-base-content/60 disabled:opacity-100"
                     class:btn-primary={playMode === mode.id}
                     aria-pressed={playMode === mode.id}
-                    disabled={mode.id !== "solo" && (!account || !competitive)}
+                    disabled={mode.id !== "solo" && (!account || !competitive || !canHost)}
                     onclick={() => selectMode(mode.id)}
                   >
                     <span class="preset-icon"
@@ -712,6 +721,11 @@
               </div>
               {#if !account}<p class="field-help mt-2">
                   {m.text_multiplayer_login()}
+                </p>{:else if competitive && !canHost}<p class="field-help mt-2">
+                  {m.text_multiplayer_subscription()}
+                  <a class="link font-semibold link-primary" href={plansUrl}
+                    >{m.action_see_plans()}</a
+                  >
                 </p>{/if}
             </div>
 

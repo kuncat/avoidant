@@ -289,7 +289,7 @@
       }
       await join();
     } catch (e) {
-      message = String(e);
+      message = e instanceof Error ? e.message : String(e);
     }
   }
   async function copyInvitation() {
