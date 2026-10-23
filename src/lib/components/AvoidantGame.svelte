@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, type Snippet } from "svelte";
   import OptionHelp from "./OptionHelp.svelte";
   import ScoreSummary from "./ScoreSummary.svelte";
   import MapIcon from "./MapIcon.svelte";
@@ -63,9 +63,16 @@
     competitive?: CompetitiveConfig;
     accountClient?: CompetitiveConfig["account"];
     plansUrl?: string;
+    /** Shown at the bottom of the start menu only, for example a host's policy links. */
+    menuFooter?: Snippet;
   };
 
-  let { competitive, accountClient, plansUrl = "https://kuncat.com/subscriptions/" }: AvoidantGameProps = $props();
+  let {
+    competitive,
+    accountClient,
+    plansUrl = "https://kuncat.com/subscriptions/",
+    menuFooter,
+  }: AvoidantGameProps = $props();
   const authentication = $derived(accountClient ?? competitive?.account);
   let competitiveOpen = $state(false);
   let account = $state<{ id: string; capabilities: string[] } | null>(null);
@@ -1286,6 +1293,7 @@
             {/each}
           </select>
         </div>
+        {#if menuFooter}<div class="mt-4">{@render menuFooter()}</div>{/if}
       {/if}
     {/if}
   </div>
