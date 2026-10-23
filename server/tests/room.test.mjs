@@ -32,7 +32,6 @@ function runtime(requireEntitlement = "false", persist, authTtl = 900_000) {
       DATABASE_URL: "postgresql://test:test@db.test/kuncat",
       ALLOWED_ORIGINS: "https://games.example",
       ACCOUNT_API: "https://accounts.example",
-      REQUIRE_ENTITLEMENT: requireEntitlement,
     },
     outboundService: async (request) => {
       if (new URL(request.url).pathname === "/sql") return (await pg).fetch(request);
@@ -41,7 +40,7 @@ function runtime(requireEntitlement = "false", persist, authTtl = 900_000) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       return Response.json({
         id: await (await pg).account(token.slice(7)),
-        capabilities: [],
+        capabilities: requireEntitlement === "false" && token === "Bearer a" ? ["games:host"] : [],
         expiresAt: Date.now() + authTtl,
       });
     },

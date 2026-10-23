@@ -58,13 +58,12 @@ export async function startLocalMultiplayer({
         DATABASE_URL: "postgresql://test:test@db.test/kuncat",
         ALLOWED_ORIGINS: [...new Set([`http://127.0.0.1:${webPort}`, browserOrigin])].join(","),
         ACCOUNT_API: "https://accounts.test",
-        REQUIRE_ENTITLEMENT: "false",
       },
       outboundService: async (request) => {
         if (new URL(request.url).pathname === "/sql") return pg.fetch(request);
         return Response.json({
           id: await pg.account(request.headers.get("Authorization").slice(7)),
-          capabilities: [],
+          capabilities: ["games:host"],
           expiresAt: Date.now() + 900000,
         });
       },

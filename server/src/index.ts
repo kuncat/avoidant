@@ -17,7 +17,6 @@ interface Env extends HistoryEnv {
   };
   ALLOWED_ORIGINS: string;
   ACCOUNT_API: string;
-  REQUIRE_ENTITLEMENT: string;
 }
 interface TVPair {
   claim: string;
@@ -214,10 +213,10 @@ export default {
         }
       }
       if (
-        env.REQUIRE_ENTITLEMENT !== "false" &&
-        !account.capabilities.includes("avoidant:competitive")
+        url.pathname === "/matches" &&
+        !account.capabilities.includes("games:host")
       )
-        return reply({ error: "Competitive entitlement required" }, 403);
+        return reply({ error: "Games subscription required to host" }, 403);
       const quota = await env.MATCHES.get(env.MATCHES.idFromName(`quota:${account.id}`)).fetch(
         new Request("https://internal/quota", { method: "POST" }),
       );

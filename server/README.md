@@ -105,8 +105,8 @@ that replaces the external account service only inside Miniflare.
 
 Use the sibling infra `platform/multiplayer` Terraform root for production. It
 builds and publishes both Workers using Wrangler and provisions their custom
-domains and Durable Object migration. REQUIRE_ENTITLEMENT=false permits all
-verified Kuncat accounts; true requires `avoidant:competitive` from PostgreSQL.
+domains and Durable Object migration. Creating a match requires `games:host`;
+joining requires a verified Kuncat account without a subscription.
 Billing/checkout is not implemented.
 
 Current bounds: 2–8 players for collaborative and territory, 16 sockets per room, 60 lobby

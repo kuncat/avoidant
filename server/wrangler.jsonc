@@ -8,6 +8,5 @@
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4321",
     "ACCOUNT_API": "http://localhost:8788",
-    "REQUIRE_ENTITLEMENT": "false",
   },
 }

@@ -65,7 +65,7 @@
     plansUrl?: string;
   };
 
-  let { competitive, accountClient, plansUrl = "https://games.kuncat.com/?subscription=choose" }: AvoidantGameProps = $props();
+  let { competitive, accountClient, plansUrl = "https://kuncat.com/subscriptions/" }: AvoidantGameProps = $props();
   const authentication = $derived(accountClient ?? competitive?.account);
   let competitiveOpen = $state(false);
   let account = $state<{ id: string; capabilities: string[] } | null>(null);
