@@ -1,0 +1,40 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend-and-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo install wasm-pack --version 0.13.1 --locked
+      - run: cargo test --workspace --locked
+      - run: npm ci
+      - run: npm run build:wasm && npm run build:paraglide
+      - run: npm run check
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: npm test
+      - run: npm run build
+      - run: npm run build:package
+      - run: npm ci --prefix server
+      - run: npm --prefix server run build:rules
+      - run: npm --prefix server run check
+      - run: npm --prefix server run build
+      # History/room/subscription contracts need private schemas; infra CI runs them.
+      - run: node --test server/tests/cleanup.test.mjs
