@@ -248,5 +248,6 @@
         "countPlural=other": "Seconds"
       }
     }
-  ]
+  ],
+  "share_watch_help": "Anyone with this code can join or watch."
 }

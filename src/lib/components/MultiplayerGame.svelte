@@ -491,6 +491,7 @@
               onclick={(event) => event.currentTarget.select()}
             />
           </label>
+          <p class="text-sm">{m.share_watch_help()}</p>
           <div class="flex flex-wrap justify-center gap-2">
             <button class="btn btn-secondary" onclick={copyInvitation}
               >{copied ? m.action_copied() : m.action_copy_invitation()}</button

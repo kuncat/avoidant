@@ -99,7 +99,14 @@ as configured in `src/app.css` and the sibling games site's stylesheet.
 ## TV spectators
 
 `AvoidantSpectator` renders an existing match with a `SpectatorSession` capability.
-The Games launcher handles QR pairing and passes that session to the component.
+The Games launcher offers “Watch a game”: entering an active sharing code obtains
+that session without host approval. The existing “Scan to host” QR flow remains
+available for creating a game from a phone. Anyone with a sharing code can join or
+watch. `POST /pair` accepts `{code}` and returns `{id,capability}`; attempts are
+limited to 60 per IP/hour. Display credentials expire after 24 hours or room cleanup.
+Four active spectator sockets are allowed per match, with separate pending-ticket
+capacity for players. Reconnects reuse the credential and replace the old display
+socket. Up to 128 credentials are retained, pruning the oldest inactive credentials.
 The server enforces read-only sockets independently of UI controls. Spectators
 receive the same redacted snapshot as players and do not consume player seats.
 `CompetitiveConfig.tvPair` links a phone-created match to a pending TV display.

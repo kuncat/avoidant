@@ -505,3 +505,60 @@ for (const displayOrigin of ["https://games.example", "null"]) test(`TV pairing 
     await mf.dispose();
   }
 });
+
+for (const displayOrigin of ['https://games.example', 'null']) test(`shared game spectators need no host pairing and reserve player capacity (${displayOrigin})`, async () => {
+  const mf = runtime();
+  const sockets = [];
+  try {
+    const created = await post(mf, '/matches', { map: 'small', mode: 'territory', bordering: false, turnBased: false, floodLimit: 3 });
+    assert.equal(created.status, 201);
+    const { id } = await created.json();
+    const pair = (code) => mf.dispatchFetch('https://game.example/pair', {
+      method: 'POST', headers: { Origin: displayOrigin }, body: JSON.stringify({ code }),
+    });
+    assert.equal((await pair('NOEXIST')).status, 404);
+    assert.equal((await pair(crypto.randomUUID())).status, 404);
+    const grants = [];
+    for (let i = 0; i < 5; i++) {
+      const response = await pair(id);
+      assert.equal(response.status, 200);
+      grants.push(await response.json());
+    }
+    const watch = (g) => mf.dispatchFetch(`https://game.example/matches/${id}/watch`, {
+      method: 'POST', headers: { Origin: displayOrigin, Authorization: `Spectator ${g.capability}` },
+    });
+    const open = async (g) => {
+      const response = await watch(g);
+      if (!response.ok) return response;
+      const { ticket } = await response.json();
+      return mf.dispatchFetch(`https://game.example/matches/${id}/socket?ticket=${ticket}`, { headers: { Origin: displayOrigin, Upgrade: 'websocket' } });
+    };
+    for (const g of grants.slice(0, 4)) {
+      const response = await open(g);
+      assert.equal(response.status, 101);
+      response.webSocket.accept();
+      sockets.push(response.webSocket);
+    }
+    assert.equal((await open(grants[4])).status, 429);
+    const reconnect = await open(grants[0]);
+    assert.equal(reconnect.status, 101);
+    reconnect.webSocket.accept();
+    sockets.push(reconnect.webSocket);
+    const a = await connect(mf, id, 'a', 'Host');
+    const b = await connect(mf, id, 'b', 'Guest');
+    sockets.push(a.ws, b.ws);
+    a.ws.send(JSON.stringify({ kind: 'start' }));
+    const snapshot = (await a.next(m => m.type === 'snapshot' && m.snapshot.started)).snapshot;
+    assert.equal(snapshot.players.length, 2);
+    const closed = new Promise(resolve => reconnect.webSocket.addEventListener('close', resolve, { once: true }));
+    reconnect.webSocket.send(JSON.stringify({ kind: 'start' }));
+    assert.equal((await closed).code, 1008);
+    const replacement = await open(grants[4]);
+    assert.equal(replacement.status, 101);
+    replacement.webSocket.accept();
+    sockets.push(replacement.webSocket);
+  } finally {
+    for (const ws of sockets) ws.close();
+    await mf.dispose();
+  }
+});

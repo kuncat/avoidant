@@ -74,6 +74,19 @@ try {
   await a.getByRole("button", { name: "Start", exact: true }).click();
   await a.getByRole("button", { name: "Start match", exact: true }).waitFor();
   assert.ok(matchId);
+  // A second TV joins an existing game directly, without a phone pairing offer.
+  if (!packaged) {
+    const viewerContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const viewer = await viewerContext.newPage();
+    viewer.on("pageerror", e => errors.push(e.message));
+    await viewer.goto(tv.url());
+    await viewer.getByLabel("Watch a game", { exact: true }).fill(matchId);
+    await viewer.getByRole("button", { name: "Watch", exact: true }).click();
+    await viewer.locator("canvas").waitFor();
+    await viewer.reload();
+    await viewer.locator("canvas").waitFor();
+    await viewerContext.close();
+  }
   const b = await phone("Guest");
   await b.goto(`${h.url}avoidant/?match=${matchId}`);
   await a.getByRole("button", { name: "Start match", exact: true }).click();

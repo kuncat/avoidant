@@ -9,7 +9,7 @@ const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8")
   "",
 );
 const moduleSource = `class DurableObject { constructor(ctx) { this.ctx = ctx; } }\n${stripTypeScriptTypes(source)}`;
-const { MatchRoom } = await import(
+const { MatchRoom, default: worker } = await import(
   `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`
 );
 
@@ -133,4 +133,31 @@ test("retirement retries preserve the ID after playable state is removed", async
   await room.alarm();
   assert.equal(calls, 2);
   assert.equal(data.size, 0);
+});
+
+
+test('sharing-code exchange accepts packaged displays and rejects unknown or finished games', async () => {
+  const room = new MatchRoom({
+    storage: { get: async () => undefined, put: async () => {} },
+    blockConcurrencyWhile: fn => fn(), getWebSockets: () => [],
+  }, {});
+  await Promise.resolve();
+  room.saved = { id: crypto.randomUUID(), snapshot: { finished: false } };
+  const env = {
+    ALLOWED_ORIGINS: 'https://games.test',
+    INVITATIONS: { resolve: async code => code === 'SHARECODE' ? { session: room.saved.id } : null },
+    MATCHES: { idFromName: x => x, get: id => id.startsWith('watch-quota:') ? { fetch: async () => Response.json({}) } : room },
+  };
+  const pair = code => worker.fetch(new Request('https://api.test/pair', {
+    method: 'POST', headers: { Origin: 'null' }, body: JSON.stringify({ code }),
+  }), env);
+  const first = await pair('SHARECODE');
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get('Access-Control-Allow-Origin'), 'null');
+  const second = await pair('SHARECODE');
+  assert.equal(second.status, 200);
+  assert.notEqual((await first.json()).capability, (await second.json()).capability);
+  assert.equal((await pair('BADCODE')).status, 404);
+  room.saved.snapshot.finished = true;
+  assert.equal((await pair('SHARECODE')).status, 410);
 });

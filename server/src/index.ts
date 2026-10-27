@@ -26,6 +26,7 @@ interface TVPair {
 }
 interface Saved {
   spectator?: string;
+  displays?: { capability: string; expires: number }[];
   state: string;
   snapshot: Snapshot;
   map: keyof typeof catalog;
@@ -85,6 +86,7 @@ export default {
     // display endpoints (and initial pairing) accept it; account/player APIs do not.
     const displayPath = new URL(request.url).pathname;
     const packagedDisplay = origin === "null" && (
+      displayPath === "/pair" ||
       /^\/tv(?:\/[a-f0-9-]{36})?$/.test(displayPath) ||
       /^\/matches\/[a-f0-9-]{36}\/(watch|socket)$/.test(displayPath)
     );
@@ -102,6 +104,21 @@ export default {
     let response: Response;
     try {
       const url = new URL(request.url);
+      if (url.pathname === "/pair" && request.method === "POST") {
+        const quota = await env.MATCHES.get(env.MATCHES.idFromName(`watch-quota:${request.headers.get("CF-Connecting-IP") ?? origin}`))
+          .fetch(new Request("https://internal/quota", { method: "POST" }));
+        if (!quota.ok) return reply({ error: "Too many sharing code attempts" }, 429);
+        const raw = await boundedBody(request, 1024);
+        if (raw === null) return reply({ error: "Request too large" }, 413);
+        const input = JSON.parse(raw || "{}");
+        if (typeof input.code !== "string" || (!/^[A-Z]{4,32}$/.test(input.code) && !uuid.test(input.code)))
+          return reply({ error: "Invalid sharing code" }, 400);
+        const resolved = uuid.test(input.code) ? { session: input.code } : await env.INVITATIONS?.resolve(input.code);
+        if (!resolved) return reply({ error: "Game not found or expired" }, 404);
+        const granted = await env.MATCHES.get(env.MATCHES.idFromName(resolved.session))
+          .fetch(new Request("https://internal/display-share", { method: "POST" }));
+        return reply(await granted.json(), granted.status);
+      }
       const tv = /^\/tv\/([a-f0-9-]{36})$/.exec(url.pathname);
       if (url.pathname === "/tv" && request.method === "POST") {
         const quota = await env.MATCHES.get(
@@ -568,22 +585,43 @@ export class MatchRoom extends DurableObject<Env> {
         return json({ capability: this.saved.spectator });
       }
       if (!this.saved) return json({ error: "Match not found" }, 404);
+      if (url.pathname === "/display-share") {
+        if (this.saved.snapshot.finished || this.saved.archived) return json({ error: "Game finished" }, 410);
+        const displays = (this.saved.displays ?? []).filter(d => d.expires > Date.now());
+        if (displays.length >= 128) {
+          const active = new Set(this.ctx.getWebSockets().filter(ws => ws.readyState === 1)
+            .map(ws => (ws.deserializeAttachment() as Attachment).actor));
+          const idle = displays.findIndex(d => !active.has(`display:${d.capability}`));
+          if (idle < 0) return json({ error: "Display limit reached" }, 429);
+          displays.splice(idle, 1);
+        }
+        const capability = crypto.randomUUID();
+        displays.push({ capability, expires: Date.now() + 24 * 3600_000 });
+        this.saved.displays = displays;
+        await this.ctx.storage.put("match", this.saved);
+        return json({ id: this.saved.id, capability });
+      }
       if (url.pathname === "/watch") {
-        if (
-          !this.saved.spectator ||
-          request.headers.get("Authorization") !== `Spectator ${this.saved.spectator}`
-        )
+        const auth = request.headers.get("Authorization") ?? "";
+        const capability = auth.startsWith("Spectator ") ? auth.slice(10) : "";
+        if (!capability || (capability !== this.saved.spectator &&
+          !this.saved.displays?.some(d => d.capability === capability && d.expires > Date.now())))
           return json({ error: "Invalid display capability" }, 401);
-        const tickets = await this.ctx.storage.list<{ expires: number }>({ prefix: "ticket:" });
+        const otherDisplays = this.ctx.getWebSockets().filter(ws => {
+          const peer = ws.deserializeAttachment() as Attachment;
+          return ws.readyState === 1 && peer.readOnly && peer.actor !== `display:${capability}`;
+        });
+        if (otherDisplays.length >= 4) return json({ error: "Four TVs are already watching this game" }, 429);
+        const tickets = await this.ctx.storage.list<{ expires: number; readOnly?: boolean }>({ prefix: "ticket:" });
         let pending = 0;
         for (const [key, value] of tickets) {
           if (value.expires < Date.now()) await this.ctx.storage.delete(key);
-          else pending++;
+          else if (value.readOnly) pending++;
         }
-        if (pending >= 32) return json({ error: "Too many pending connections" }, 429);
+        if (pending >= 16) return json({ error: "Too many pending connections" }, 429);
         const ticket = crypto.randomUUID();
         await this.ctx.storage.put(`ticket:${ticket}`, {
-          actor: "",
+          actor: `display:${capability}`,
           readOnly: true,
           authExpires: Date.now() + 24 * 3600_000,
           expires: Date.now() + 30_000,
@@ -606,12 +644,12 @@ export class MatchRoom extends DurableObject<Env> {
         await this.persist(result, command);
         if (result.error) return json({ error: result.error }, 409);
         const ticket = crypto.randomUUID();
-        const tickets = await this.ctx.storage.list({ prefix: "ticket:" });
+        const tickets = await this.ctx.storage.list<{ expires: number; readOnly?: boolean }>({ prefix: "ticket:" });
         // Bounded transient tickets, including reconnects that never upgraded.
         for (const [key, value] of tickets)
           if ((value as { expires: number }).expires < Date.now())
             await this.ctx.storage.delete(key);
-        if (tickets.size >= 32) return json({ error: "Too many pending connections" }, 429);
+        if ([...tickets.values()].filter(t => !t.readOnly && t.expires > Date.now()).length >= 32) return json({ error: "Too many pending connections" }, 429);
         await this.ctx.storage.put(`ticket:${ticket}`, {
           actor,
           authExpires,
@@ -641,7 +679,17 @@ export class MatchRoom extends DurableObject<Env> {
         }>(`ticket:${ticket}`);
         await this.ctx.storage.delete(`ticket:${ticket}`);
         if (!entry || entry.expires < Date.now()) return json({ error: "Ticket expired" }, 401);
-        if (this.ctx.getWebSockets().length >= 16)
+        const sockets = this.ctx.getWebSockets().filter(ws => ws.readyState === 1);
+        const others = sockets.filter(ws => {
+          const peer = ws.deserializeAttachment() as Attachment;
+          return !entry.readOnly || !peer.readOnly || peer.actor !== entry.actor;
+        });
+        if (entry.readOnly && others.filter(ws => (ws.deserializeAttachment() as Attachment).readOnly).length >= 4)
+          return json({ error: "Four TVs are already watching this game" }, 429);
+        for (const ws of sockets) {
+          if (!others.includes(ws)) ws.close(1000, "Reconnected");
+        }
+        if (others.length >= 16)
           return json({ error: "Room connection limit" }, 429);
         const pair = new WebSocketPair();
         this.ctx.acceptWebSocket(pair[1]);
