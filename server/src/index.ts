@@ -120,6 +120,38 @@ export default {
         return reply(await granted.json(), granted.status);
       }
       const tv = /^\/tv\/([a-f0-9-]{36})$/.exec(url.pathname);
+      // A phone already in a game sends it to a waiting TV: the TV's QR claim plus the game's
+      // own sharing code, so the game keeps one code and needs no host action.
+      const attach = /^\/tv\/([a-f0-9-]{36})\/attach$/.exec(url.pathname);
+      if (attach && request.method === "POST") {
+        const quota = await env.MATCHES.get(env.MATCHES.idFromName(`watch-quota:${request.headers.get("CF-Connecting-IP") ?? origin}`))
+          .fetch(new Request("https://internal/quota", { method: "POST" }));
+        if (!quota.ok) return reply({ error: "Too many sharing code attempts" }, 429);
+        const raw = await boundedBody(request, 1024);
+        if (raw === null) return reply({ error: "Request too large" }, 413);
+        const input = JSON.parse(raw || "{}");
+        if (!uuid.test(attach[1]) || typeof input.claim !== "string" || !uuid.test(input.claim) ||
+          typeof input.code !== "string" || (!/^[A-Z]{4,32}$/.test(input.code) && !uuid.test(input.code)))
+          return reply({ error: "Invalid TV pairing" }, 400);
+        const pair = env.MATCHES.get(env.MATCHES.idFromName(`tv:${attach[1]}`));
+        const valid = await pair.fetch(new Request("https://internal/tv-validate", {
+          method: "POST", body: JSON.stringify({ claim: input.claim }),
+        }));
+        if (!valid.ok) return reply({ error: "TV pairing expired or already used" }, 409);
+        const resolved = uuid.test(input.code) ? { session: input.code } : await env.INVITATIONS?.resolve(input.code);
+        if (!resolved) return reply({ error: "Game not found or expired" }, 404);
+        const granted = await env.MATCHES.get(env.MATCHES.idFromName(resolved.session))
+          .fetch(new Request("https://internal/display-share", { method: "POST" }));
+        if (!granted.ok) return reply(await granted.json(), granted.status);
+        const display = (await granted.json()) as { id: string; capability: string };
+        const invitation = await env.INVITATIONS?.register(display.id).catch(() => undefined);
+        const attached = await pair.fetch(new Request("https://internal/tv-attach", {
+          method: "POST",
+          body: JSON.stringify({ claim: input.claim, display: { ...display, invitationUrl: invitation?.url } }),
+        }));
+        if (!attached.ok) return reply({ error: "TV pairing expired or already used" }, 409);
+        return reply({ ok: true, id: display.id });
+      }
       if (url.pathname === "/tv" && request.method === "POST") {
         const quota = await env.MATCHES.get(
           env.MATCHES.idFromName(`tv-quota:${request.headers.get("CF-Connecting-IP") ?? origin}`),

@@ -421,6 +421,35 @@ test("completed times survive restart in private history", async () => {
   }
 });
 
+test("a phone sends a game it is already in to a waiting TV with the sharing code", async () => {
+  const mf = runtime();
+  try {
+    const created = await post(mf, "/matches", { map: "small", mode: "territory", bordering: false, turnBased: false, floodLimit: 3 });
+    const { id } = await created.json();
+    const pair = await (await mf.dispatchFetch("https://game.example/tv", { method: "POST", headers: { Origin: "null" } })).json();
+    const attach = (body) => mf.dispatchFetch(`https://game.example/tv/${pair.id}/attach`, {
+      method: "POST", headers: { Origin: "https://games.example", "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    assert.equal((await attach({ claim: crypto.randomUUID(), code: id })).status, 409);
+    assert.equal((await attach({ claim: pair.claim, code: "bad code" })).status, 400);
+    assert.equal((await attach({ claim: pair.claim, code: crypto.randomUUID() })).status, 404);
+    const attached = await attach({ claim: pair.claim, code: id });
+    assert.equal(attached.status, 200);
+    assert.equal((await attached.json()).id, id);
+    assert.equal((await attach({ claim: pair.claim, code: id })).status, 409, "claims are single-use");
+    const { display } = await (await mf.dispatchFetch(`https://game.example/tv/${pair.id}`, {
+      headers: { Origin: "null", Authorization: `TV ${pair.viewer}` },
+    })).json();
+    assert.equal(display.id, id);
+    const watched = await mf.dispatchFetch(`https://game.example/matches/${id}/watch`, {
+      method: "POST", headers: { Origin: "null", Authorization: `Spectator ${display.capability}` },
+    });
+    assert.equal(watched.status, 200);
+  } finally {
+    await mf.dispose();
+  }
+});
+
 for (const displayOrigin of ["https://games.example", "null"]) test(`TV pairing is one-use and spectators cannot occupy seats or play (${displayOrigin})`, async () => {
   const mf = runtime();
   try {

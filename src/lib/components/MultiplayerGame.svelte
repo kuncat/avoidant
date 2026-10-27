@@ -15,6 +15,7 @@
   import type { GameOptions } from "$lib/wasm/avoidant_wasm";
   import { revealSweep } from "$lib/multiplayer/reveal";
   import { MatchClient } from "$lib/multiplayer/client";
+  import { forgetMatch, rememberMatch } from "$lib/multiplayer/current-match";
   import {
     PLAYER_COLORS,
     type BoardState,
@@ -48,6 +49,7 @@
   } = $props();
   let account = $state<{ id: string; capabilities: string[] } | null>(null);
   let message = $state("");
+  let tvNotice = $state("");
   let connectionIssue = $state(false);
   let flat = $state(false);
   let matchId = $state("");
@@ -236,7 +238,10 @@
   }
   async function join() {
     if (!account && !spectator) return;
-    if (!spectator) sessionStorage.setItem("avoidant:competitiveMatch", matchId);
+    if (!spectator) {
+      sessionStorage.setItem("avoidant:competitiveMatch", matchId);
+      if (account) rememberMatch(matchId, account.id);
+    }
     client?.close();
     connectionGeneration++;
     copied = false;
@@ -268,7 +273,28 @@
     invitationUrl = url.toString();
     if (!spectator) history.replaceState(null, "", url);
     await client.connect();
+    if (config.tvPair && !spectator) await showOnTV(config.tvPair);
   }
+  /** A phone that scanned a TV's code and then joined a game sends that game to the TV. */
+  async function showOnTV(pair: { id: string; claim: string }) {
+    try {
+      const response = await fetch(`${config.serverUrl}/tv/${pair.id}/attach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claim: pair.claim, code: matchId }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error);
+      tvNotice = m.status_tv_showing();
+    } catch {
+      tvNotice = m.error_tv_pairing();
+    } finally {
+      sessionStorage.removeItem("avoidant:tv-pair");
+      config.tvPair = undefined;
+    }
+  }
+  $effect(() => {
+    if (snapshot?.finished && !spectator) forgetMatch();
+  });
   async function create() {
     try {
       const response = await fetch(`${config.serverUrl}/matches`, {
@@ -305,6 +331,7 @@
   function leave() {
     resetAnimations();
     sessionStorage.removeItem("avoidant:competitiveMatch");
+    forgetMatch();
     const url = new SvelteURL(window.location.href);
     url.searchParams.delete("match");
     history.replaceState(null, "", url);
@@ -418,6 +445,7 @@
         </div>
       </div>
       {#if snapshot?.finished}<MatchResults players={snapshot.players} />{/if}
+      {#if tvNotice}<p role="status" class="mt-2 text-sm opacity-80">{tvNotice}</p>{/if}
       {#if message}
         <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
           <p role="status" class="text-amber-300">{message}</p>

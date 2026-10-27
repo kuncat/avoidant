@@ -249,5 +249,7 @@
       }
     }
   ],
-  "share_watch_help": "Anyone with this code can join or watch."
+  "share_watch_help": "Anyone with this code can join or watch.",
+  "status_tv_showing": "Showing on your TV.",
+  "error_tv_pairing": "Couldn’t reach the TV. Scan its code again."
 }

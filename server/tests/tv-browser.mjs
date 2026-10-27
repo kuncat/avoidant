@@ -42,7 +42,7 @@ try {
     await tv.getByRole("switch", { name: "TV Host Mode" }).check();
     await tv.getByRole("link", { name: /Avoidant/ }).click();
   }
-  await tv.getByRole("heading", { name: "Scan to host" }).waitFor();
+  await tv.getByRole("heading", { name: "Scan with your phone" }).waitFor();
   await tv.waitForFunction(() => !!sessionStorage.getItem("avoidant:tv-display"));
   const pair = await tv.evaluate(() => JSON.parse(sessionStorage.getItem("avoidant:tv-display")));
   const phone = async (actor) => {
@@ -86,6 +86,21 @@ try {
     await viewer.reload();
     await viewer.locator("canvas").waitFor();
     await viewerContext.close();
+    // A phone already in a game scans another TV's code from a new tab and sends that game.
+    const otherContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const other = await otherContext.newPage();
+    other.on("pageerror", e => errors.push(e.message));
+    await other.goto(tv.url());
+    await other.waitForFunction(() => !!sessionStorage.getItem("avoidant:tv-display"));
+    const otherPair = await other.evaluate(() => JSON.parse(sessionStorage.getItem("avoidant:tv-display")));
+    const scan = await a.context().newPage();
+    scan.on("pageerror", e => errors.push(e.message));
+    await scan.goto(`${h.url}avoidant/#tv=${otherPair.id}.${otherPair.claim}`);
+    await scan.getByRole("button", { name: "Show my game on the TV", exact: true }).click();
+    await scan.getByText("Showing on your TV.").waitFor();
+    await other.locator("canvas").waitFor();
+    await scan.close();
+    await otherContext.close();
   }
   const b = await phone("Guest");
   await b.goto(`${h.url}avoidant/?match=${matchId}`);
