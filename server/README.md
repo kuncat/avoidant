@@ -1,5 +1,12 @@
 # Trusted multiplayer server
 
+The server imports shared discovery and metrics from the sibling
+`kuncat.com/multiplayer` directory. Keep the website checkout alongside Avoidant
+when checking or building the server. The private `kuncat/infra` CI
+`account-contracts` job checks, builds, and runs the complete server suite with
+these dependencies; this public repository's CI validates the frontend and Rust
+rules without requiring access to private source.
+
 All three multiplayer modes, including collaborative play, run Rust rules as WASM
 inside one Cloudflare SQLite Durable Object per match. Every mode requires login.
 The outer Worker delegates bearer-token verification and platform UUID resolution

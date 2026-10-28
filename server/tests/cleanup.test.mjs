@@ -8,7 +8,8 @@ const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8")
   /^import .*;\n/gm,
   "",
 );
-const moduleSource = `class DurableObject { constructor(ctx) { this.ctx = ctx; } }\n${stripTypeScriptTypes(source)}`;
+const sharedModule = new URL("../../../kuncat.com/multiplayer/server.ts", import.meta.url).href;
+const moduleSource = `import { directory, openGames, publish, metric } from ${JSON.stringify(sharedModule)};\nclass DurableObject { constructor(ctx) { this.ctx = ctx; } }\n${stripTypeScriptTypes(source)}`;
 const { MatchRoom, default: worker } = await import(
   `data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`
 );

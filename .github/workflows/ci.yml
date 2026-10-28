@@ -10,7 +10,7 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  frontend-and-worker:
+  frontend-and-rules:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -32,9 +32,6 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run build:package
-      - run: npm ci --prefix server
-      - run: npm --prefix server run build:rules
-      - run: npm --prefix server run check
-      - run: npm --prefix server run build
-      # History/room/subscription contracts need private schemas; infra CI runs them.
-      - run: node --test server/tests/cleanup.test.mjs
+      # Worker imports shared matchmaking code from the private website repository.
+      # kuncat/infra's account-contracts job checks/builds the Worker and runs its
+      # entire server suite (including cleanup) with both private dependencies.
