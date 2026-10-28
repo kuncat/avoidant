@@ -69,6 +69,7 @@ export const PLAYER_COLORS = [
 ];
 
 export interface MultiplayerSetup {
+  public?: boolean;
   mode: "collaborative" | "territory";
   map: string;
   bordering: boolean;

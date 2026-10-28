@@ -591,3 +591,28 @@ for (const displayOrigin of ['https://games.example', 'null']) test(`shared game
     await mf.dispose();
   }
 });
+
+test('public discovery is opt-in and disappears on start, with free players allowed', async () => {
+  const mf = runtime();
+  try {
+    const options = { map: 'small', mode: 'territory', bordering: true, turnBased: true, floodLimit: 2 };
+    const hidden = await (await post(mf, '/matches', options)).json();
+    const created = await post(mf, '/matches', { ...options, public: true });
+    assert.equal(created.status, 201);
+    const { id, listed } = await created.json();
+    assert.equal(listed, true);
+    const discover = async () => (await (await mf.dispatchFetch('https://game.example/open-games', { headers: { Origin: 'https://games.example' } })).json()).games;
+    let games = await discover();
+    assert.ok(!games.some(room => room.id === hidden.id));
+    assert.equal(games.find(room => room.id === id).options.map, 'small');
+    assert.equal(games.find(room => room.id === id).players, 1);
+    assert.equal((await post(mf, '/matches', { ...options, public: true }, 'b')).status, 403);
+    const host = await connect(mf, id, 'a');
+    const guest = await connect(mf, id, 'b');
+    host.ws.send(JSON.stringify({ kind: 'start' }));
+    await host.next(message => message.type === 'snapshot' && message.snapshot.started);
+    games = await discover();
+    assert.ok(!games.some(room => room.id === id));
+    host.ws.close(); guest.ws.close();
+  } finally { await mf.dispose(); }
+});

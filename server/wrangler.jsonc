@@ -5,6 +5,7 @@
   "durable_objects": { "bindings": [{ "name": "MATCHES", "class_name": "MatchRoom" }] },
   "r2_buckets": [{ "binding": "REPLAYS", "bucket_name": "kuncat-game-replays" }],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MatchRoom"] }],
+  "observability": { "enabled": true },
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4321",
     "ACCOUNT_API": "http://localhost:8788",

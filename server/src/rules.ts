@@ -1,10 +1,18 @@
+import { metric } from "../../../kuncat.com/multiplayer/server";
 import init, { transition } from "../rules/avoidant_competitive";
 import wasm from "../rules/avoidant_competitive_bg.wasm";
 let ready: Promise<unknown> | undefined;
 export async function rules(state: string, command: unknown): Promise<Result> {
+  const started = performance.now();
+  let outcome = "ok";
+  try {
   ready ??= init({ module_or_path: wasm });
   await ready;
-  return JSON.parse(transition(state, JSON.stringify(command)));
+  const result = JSON.parse(transition(state, JSON.stringify(command)));
+  if (result.error) outcome = "rejected";
+  return result;
+  } catch (error) { outcome = "error"; throw error; }
+  finally { metric("avoidant", "rules.duration_ms", performance.now() - started, outcome); }
 }
 export interface Result {
   state: string;

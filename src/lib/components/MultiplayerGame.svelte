@@ -49,6 +49,7 @@
   } = $props();
   let account = $state<{ id: string; capabilities: string[] } | null>(null);
   let message = $state("");
+  let discoveryNotice = $state("");
   let tvNotice = $state("");
   let connectionIssue = $state(false);
   let flat = $state(false);
@@ -307,6 +308,7 @@
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
+      if (setup?.public && !data.listed) discoveryNotice = m.status_public_unlisted();
       matchId = data.id;
       if (config.tvPair) {
         sessionStorage.removeItem("avoidant:tv-pair");
@@ -445,6 +447,9 @@
         </div>
       </div>
       {#if snapshot?.finished}<MatchResults players={snapshot.players} />{/if}
+      {#if discoveryNotice}<p role="status" class="mt-2 text-sm opacity-80">
+          {discoveryNotice}
+        </p>{/if}
       {#if tvNotice}<p role="status" class="mt-2 text-sm opacity-80">{tvNotice}</p>{/if}
       {#if message}
         <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">

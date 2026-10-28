@@ -65,6 +65,8 @@
     plansUrl?: string;
     /** Shown at the bottom of the start menu only, for example a host's policy links. */
     menuFooter?: Snippet;
+    /** Open public games, shown on the start menu. Receives the current language. */
+    matchmaking?: Snippet<[string]>;
   };
 
   let {
@@ -72,6 +74,7 @@
     accountClient,
     plansUrl = "https://kuncat.com/subscriptions/",
     menuFooter,
+    matchmaking,
   }: AvoidantGameProps = $props();
   const authentication = $derived(accountClient ?? competitive?.account);
   let competitiveOpen = $state(false);
@@ -80,6 +83,7 @@
   const canHost = $derived(!!account?.capabilities?.includes("games:host"));
   let authMessage = $state("");
   let playMode = $state<"solo" | MultiplayerSetup["mode"]>("solo");
+  let publicGame = $state(false);
   let multiplayerSetup = $state<MultiplayerSetup>();
   let invitation = $state<string>();
   let bordering = $state(false);
@@ -456,6 +460,7 @@
     if (playMode !== "solo") {
       if (!competitive || !account || sizePreset === "custom") return;
       multiplayerSetup = {
+        public: publicGame,
         mode: playMode,
         map: shapeKindInput === "icosahedron" ? sizePreset : `${shapeKindInput}-${sizePreset}`,
         bordering: playMode === "territory" && bordering,
@@ -576,8 +581,8 @@
   <div
     class="panel-shell w-full"
     class:max-w-full={gameState}
-    class:max-w-xl={!gameState && setupMode}
-    class:max-w-xs={!gameState && !setupMode}
+    class:max-w-xl={!gameState && (setupMode || (competitive && matchmaking))}
+    class:max-w-xs={!gameState && !setupMode && !(competitive && matchmaking)}
     class:panel-card={!gameState}
     class:panel-header={gameState}
     class:py-6={!gameState && setupMode}
@@ -1210,6 +1215,21 @@
               </fieldset>
             {/if}
           </div>
+          {#if competitive && playMode !== "solo"}<div
+              class="form-control mb-4 flex w-full flex-row items-center justify-between gap-4"
+            >
+              <label
+                class="label w-full justify-between gap-4 text-left whitespace-normal text-base-content"
+                ><span
+                  ><OptionHelp label={m.field_public_game()} help={m.help_public_game()} /></span
+                ><input
+                  type="checkbox"
+                  class="checkbox shrink-0 rounded-sm checkbox-sm checkbox-primary"
+                  aria-label={m.field_public_game()}
+                  bind:checked={publicGame}
+                /></label
+              >
+            </div>{/if}
           <div class="flex flex-wrap justify-center gap-2">
             <button class="btn btn-secondary" type="button" onclick={() => (setupMode = undefined)}>
               {m.action_back()}
@@ -1293,6 +1313,9 @@
             {/each}
           </select>
         </div>
+        {#if competitive && matchmaking}<div class="mt-6 w-full">
+            {@render matchmaking(getLocale())}
+          </div>{/if}
         {#if menuFooter}<div class="mt-4">{@render menuFooter()}</div>{/if}
       {/if}
     {/if}

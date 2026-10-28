@@ -251,5 +251,8 @@
   ],
   "share_watch_help": "Anyone with this code can join or watch.",
   "status_tv_showing": "Showing on your TV.",
-  "error_tv_pairing": "Couldn’t reach the TV. Scan its code again."
+  "error_tv_pairing": "Couldn’t reach the TV. Scan its code again.",
+  "field_public_game": "Public game",
+  "help_public_game": "List this game in open games so anyone with a Kuncat account can find and join it. Private games need the sharing code.",
+  "status_public_unlisted": "The open games list is full right now, so this game is private. Share the code to invite players."
 }

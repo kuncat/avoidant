@@ -1,3 +1,4 @@
+import { directory, openGames, publish, metric } from "../../../kuncat.com/multiplayer/server";
 import { DurableObject } from "cloudflare:workers";
 import { saveHistory, listHistory, getHistory, type HistoryEnv } from "./history";
 import { engineHash, engineBundle } from "../rules/replay-engine";
@@ -25,6 +26,7 @@ interface TVPair {
   display?: { id: string; capability: string; invitationUrl?: string };
 }
 interface Saved {
+  public?: boolean;
   spectator?: string;
   displays?: { capability: string; expires: number }[];
   state: string;
@@ -81,6 +83,7 @@ async function boundedBody(request: Request, limit: number): Promise<string | nu
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const started = Date.now();
     const origin = request.headers.get("Origin") ?? "";
     // Packaged webOS apps have an opaque origin. Only capability-authenticated
     // display endpoints (and initial pairing) accept it; account/player APIs do not.
@@ -99,11 +102,22 @@ export default {
       Vary: "Origin",
     };
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
-    const reply = (data: unknown, status = 200) =>
-      Response.json(data, { status, headers: { ...cors, "Cache-Control": "no-store" } });
+    const reply = (data: unknown, status = 200) => {
+      metric("avoidant", "request.duration_ms", Date.now() - started, `${Math.floor(status / 100)}xx`);
+      return Response.json(data, { status, headers: { ...cors, "Cache-Control": "no-store" } });
+    };
     let response: Response;
     try {
       const url = new URL(request.url);
+      if (url.pathname === "/open-games" && request.method === "GET") {
+        const quota = await env.MATCHES.get(env.MATCHES.idFromName(`discovery:${request.headers.get("CF-Connecting-IP") ?? origin}`)).fetch(new Request("https://internal/discovery-quota"));
+        if (!quota.ok) return reply({ error: "Try again later" }, 429);
+        const started = Date.now();
+        const games = await openGames(env.MATCHES.get(env.MATCHES.idFromName("public-directory")), id => env.MATCHES.get(env.MATCHES.idFromName(id)));
+        metric("avoidant", "discovery.duration_ms", Date.now() - started);
+        metric("avoidant", "discovery.results", games.length);
+        return reply({ games });
+      }
       if (url.pathname === "/pair" && request.method === "POST") {
         const quota = await env.MATCHES.get(env.MATCHES.idFromName(`watch-quota:${request.headers.get("CF-Connecting-IP") ?? origin}`))
           .fetch(new Request("https://internal/quota", { method: "POST" }));
@@ -338,7 +352,9 @@ export default {
             if (!attached.ok)
               return reply({ error: "TV pairing expired or already used; try again" }, 409);
           }
-          response = reply({ id, code: invitation?.code, invitationUrl: invitation?.url }, 201);
+          const listed = input.public === true && await publish(env.MATCHES.get(env.MATCHES.idFromName("public-directory")), id, Date.now() + 600000);
+          metric("avoidant", "room.created", 1, listed ? "public" : input.public === true ? "unlisted" : "private");
+          response = reply({ id, listed, code: invitation?.code, invitationUrl: invitation?.url }, 201);
         }
       } else {
         const raw = await boundedBody(request, 2048);
@@ -420,6 +436,11 @@ export class MatchRoom extends DurableObject<Env> {
           }
         : {}),
     });
+    if (!this.saved?.snapshot.started && saved.snapshot.started) {
+      metric("avoidant", "lobby.wait_ms", Date.now() - saved.created);
+      metric("avoidant", "room.started");
+    }
+    if (!this.saved?.snapshot.finished && saved.snapshot.finished) metric("avoidant", "room.finished");
     this.saved = saved;
     const s = result.snapshot;
     const alarm = s.finished
@@ -520,7 +541,8 @@ export class MatchRoom extends DurableObject<Env> {
     // Serialize fetch and WS mutations across every awaited storage operation.
     return this.ctx.blockConcurrencyWhile(async () => {
       const url = new URL(request.url);
-      if (url.pathname === "/quota") {
+      if (url.pathname === "/directory") return directory(this.ctx.storage, request);
+      if (url.pathname === "/quota" || url.pathname === "/discovery-quota") {
         const now = Date.now();
         const quota = (await this.ctx.storage.get<{ start: number; count: number }>("quota")) ?? {
           start: now,
@@ -530,7 +552,7 @@ export class MatchRoom extends DurableObject<Env> {
           quota.start = now;
           quota.count = 0;
         }
-        if (++quota.count > 60) return json({ error: "Rate limit" }, 429);
+        if (++quota.count > (url.pathname === "/discovery-quota" ? 600 : 60)) return json({ error: "Rate limit" }, 429);
         await this.ctx.storage.put("quota", quota);
         await this.ctx.storage.setAlarm(quota.start + 3600_000);
         return json({ ok: true });
@@ -567,6 +589,7 @@ export class MatchRoom extends DurableObject<Env> {
       if (url.pathname === "/create") {
         if (this.saved) return json({ error: "Already created" }, 409);
         const input = (await request.json()) as {
+          public?: boolean;
           map: keyof typeof catalog;
           mode: "collaborative" | "territory";
           bordering: boolean;
@@ -596,6 +619,7 @@ export class MatchRoom extends DurableObject<Env> {
           },
         });
         this.saved = {
+          public: input.public === true,
           spectator: crypto.randomUUID(),
           state: result.state,
           snapshot: result.snapshot,
@@ -617,6 +641,13 @@ export class MatchRoom extends DurableObject<Env> {
         return json({ capability: this.saved.spectator });
       }
       if (!this.saved) return json({ error: "Match not found" }, 404);
+      if (url.pathname === "/discovery") {
+        const s = this.saved;
+        if (!s.public || s.snapshot.started || s.snapshot.finished || s.snapshot.players.length >= 8 || Date.now() >= s.created + 600000)
+          return json({ error: "Unavailable" }, 410);
+        return json({ id: s.id, game: "avoidant", options: { ...s.snapshot.options, map: s.map },
+          players: s.snapshot.players.length, capacity: 8, created: s.created, expires: s.created + 600000 });
+      }
       if (url.pathname === "/display-share") {
         if (this.saved.snapshot.finished || this.saved.archived) return json({ error: "Game finished" }, 410);
         const displays = (this.saved.displays ?? []).filter(d => d.expires > Date.now());
@@ -674,6 +705,7 @@ export class MatchRoom extends DurableObject<Env> {
         };
         const result = await rules(this.saved.state, command);
         await this.persist(result, command);
+        metric("avoidant", "room.join", 1, result.error ? "unavailable" : "ok");
         if (result.error) return json({ error: result.error }, 409);
         const ticket = crypto.randomUUID();
         const tickets = await this.ctx.storage.list<{ expires: number; readOnly?: boolean }>({ prefix: "ticket:" });
@@ -799,6 +831,7 @@ export class MatchRoom extends DurableObject<Env> {
     ws.close(code, reason);
   }
   async alarm() {
+    if (await this.ctx.storage.get("directory")) { await directory(this.ctx.storage, new Request("https://internal/directory")); return; }
     await this.ctx.blockConcurrencyWhile(async () => {
       if (!this.saved || this.saved.snapshot.finished || !this.saved.snapshot.started) {
         if (this.saved?.snapshot.finished) {
