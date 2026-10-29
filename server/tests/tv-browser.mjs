@@ -28,12 +28,12 @@ try {
       ws.onClose(() => server.close());
       ws.onMessage(data => { if (server.readyState === WebSocket.OPEN) server.send(data); });
     });
-    await context.route("https://games.kuncat.com/karrom/tv-bundle/**", async route => {
+    await context.route("https://games.kuncat.com/tv-bundle/**", async route => {
       const name = new URL(route.request().url()).pathname.split("tv-bundle/")[1];
       const type = name.endsWith(".js") ? "application/javascript" : name.endsWith(".css") ? "text/css" : name.endsWith(".svg") ? "image/svg+xml" : name.endsWith(".png") ? "image/png" : "text/html";
-      await route.fulfill({ body: await readFile(new URL(`../../../karrom/dist/tv/${name}`, import.meta.url)), contentType: type });
+      await route.fulfill({ body: await readFile(new URL(`../../../kuncat.com/tv/dist/android/${name}`, import.meta.url)), contentType: type });
     });
-    await tv.goto(fileOrigin ? new URL("../../../karrom/dist/tv/index.html", import.meta.url).href : "https://games.kuncat.com/karrom/tv-bundle/index.html");
+    await tv.goto(fileOrigin ? new URL("../../../kuncat.com/tv/dist/android/index.html", import.meta.url).href : "https://games.kuncat.com/tv-bundle/index.html");
     await tv.getByRole("button", { name: "Karrom", exact: true }).click();
     await tv.locator("#games").click();
     await tv.getByRole("button", { name: "Avoidant", exact: true }).click();
