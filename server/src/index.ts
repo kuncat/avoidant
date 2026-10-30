@@ -1,4 +1,12 @@
 import { directory, openGames, publish, metric } from "../../../kuncat.com/multiplayer/server";
+import { authorizePlayer, type GameAccess } from "../../../kuncat.com/multiplayer/room/access";
+/** Released: any account joins; hosting needs the Games subscription. */
+const AVOIDANT_ACCESS: GameAccess = {
+  game: "Avoidant",
+  join: null,
+  host: "games:host",
+  hostDenied: "Games subscription required to host",
+};
 import { DurableObject } from "cloudflare:workers";
 import { saveHistory, listHistory, getHistory, type HistoryEnv } from "./history";
 import { engineHash, engineBundle } from "../rules/replay-engine";
@@ -219,29 +227,9 @@ export default {
             !(match && uuid.test(match[1]) && match[2] === "connect")))
       )
         return reply({ error: "Not found" }, 404);
-      const authorization = request.headers.get("Authorization");
-      if (!authorization?.startsWith("Bearer ")) return reply({ error: "Login required" }, 401);
-      const accountResponse = await fetch(`${env.ACCOUNT_API}/v1/me`, {
-        headers: { Authorization: authorization },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!accountResponse.ok)
-        return reply(
-          { error: "Account verification failed" },
-          accountResponse.status === 401 ? 401 : 503,
-        );
-      const account = (await accountResponse.json()) as {
-        id: string;
-        capabilities: string[];
-        expiresAt: number;
-      };
-      if (
-        typeof account.id !== "string" ||
-        !Array.isArray(account.capabilities) ||
-        !Number.isFinite(account.expiresAt) ||
-        account.expiresAt <= Date.now()
-      )
-        throw new Error("Invalid account response");
+      const access = await authorizePlayer(request, env, "play", Date.now(), AVOIDANT_ACCESS);
+      if (!("account" in access)) return reply({ error: access.error }, access.status);
+      const account = access.account;
       if (url.pathname === "/history" || historyPath) {
         try {
           if (!historyPath)
