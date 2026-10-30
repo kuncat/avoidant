@@ -7,6 +7,17 @@
   font-display: swap;
 }
 
+/* The Open Sans build here ships no arrow glyphs, so devices drew ← ↑ → ↓ from whatever fallback
+   font they had, at whatever height it put them. These four come from Noto Sans Symbols
+   (OFL; licence beside the file), under the same family name so every arrow renders alike. */
+@font-face {
+  font-family: "Open Sans";
+  src: url("../assets/fonts/noto-sans-symbols-arrows.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+  unicode-range: U+2190-2193;
+}
+
 :root {
   --avoidant-font-sans:
     "Open Sans", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
