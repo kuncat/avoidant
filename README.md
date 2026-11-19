@@ -96,6 +96,26 @@ The shared menu uses DaisyUI 5 with Tailwind 4. Consumers of the Svelte package
 must install `daisyui` and enable its Tailwind plugin (themes `winter` and `night`),
 as configured in `src/app.css` and the sibling games site's stylesheet.
 
+## Client package and embedding
+
+`@kuncat/avoidant` provides one Svelte client package for embedders. Matchmaking
+integration does not require a separate package edition.
+
+`AvoidantGame` accepts optional integration props: `competitive` supplies the
+multiplayer endpoint and account adapter, `accountClient` supports account access,
+`plansUrl` supplies the subscription destination, and `menuFooter` supplies footer
+content. The optional `matchmaking` snippet receives the current locale and is
+rendered on the menu when competitive play is configured. Embedders can supply
+their own open-game browser through this snippet. The standalone app currently
+supplies no matchmaking snippet.
+
+The npm archive contains the client `dist`, including generated WASM and translations.
+It does not contain or deploy the multiplayer Worker in `server/`. Hosting public
+rooms requires a compatible multiplayer server with discovery support and configured
+services. The current server implementation also imports shared modules outside
+this repository; installing the client package alone does not provide a complete
+standalone server deployment.
+
 ## TV spectators
 
 `AvoidantSpectator` renders an existing match with a `SpectatorSession` capability.
