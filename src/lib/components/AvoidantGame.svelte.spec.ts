@@ -46,6 +46,19 @@ describe("AvoidantGame start menu", () => {
     await expect.element(page.getByRole("heading", { name: "Open games" })).not.toBeInTheDocument();
   });
 
+  it("joins the ticket field to its Join button, with Back on the same row", async () => {
+    render(AvoidantGame, { competitive });
+    await page.getByRole("button", { name: /^Join Game/ }).click();
+    const field = page.getByLabelText("Ticket or Invitation URL");
+    await expect.element(field).toBeVisible();
+    // Styles are not loaded here, so this checks grouping; Games' browser test checks pixels.
+    const group = field.element().closest(".join")!;
+    const join = page.getByRole("button", { name: "Join", exact: true }).element();
+    const back = page.getByRole("button", { name: "Back" }).element();
+    expect(join.parentElement).toBe(group);
+    expect(back.parentElement).toBe(group.parentElement);
+  });
+
   it("renders the embedder's count inside the Join Game button", async () => {
     render(AvoidantGame, { competitive, joinBadge });
     const join = page.getByRole("button", { name: /^Join Game/ });

@@ -1250,28 +1250,10 @@
             await joinGame();
           }}
         >
-          <div class="-mx-3 mb-2 flex flex-wrap">
-            <div class="mb-6 w-full px-3 md:mb-0">
-              <label class="field-label" for="ticket-input"
-                >{m.field_ticket_or_invitation_url()}</label
-              >
-              <input
-                class="input mb-3 w-full input-sm"
-                id="ticket-input"
-                type="text"
-                bind:value={ticketInput}
-                oninput={() => (joinError = undefined)}
-              />
-            </div>
-            {#if joinError}
-              <div class="w-full px-3" transition:slide={{ duration: 150 }}>
-                <p class="join-error" role="alert">{joinError}</p>
-              </div>
-            {/if}
-          </div>
-          <div class="flex flex-wrap justify-center gap-2">
+          <label class="field-label" for="ticket-input">{m.field_ticket_or_invitation_url()}</label>
+          <div class="flex gap-2">
             <button
-              class="btn btn-secondary"
+              class="btn btn-secondary btn-sm"
               type="button"
               onclick={() => {
                 setupMode = undefined;
@@ -1280,11 +1262,27 @@
             >
               {m.action_back()}
             </button>
-            <button class="btn btn-primary" type="submit" disabled={!account || !competitive}
-              >{m.action_join()}</button
-            >
+            <div class="join min-w-0 flex-1">
+              <input
+                class="input join-item w-full input-sm"
+                id="ticket-input"
+                type="text"
+                bind:value={ticketInput}
+                oninput={() => (joinError = undefined)}
+              />
+              <button
+                class="btn join-item btn-primary btn-sm"
+                type="submit"
+                disabled={!account || !competitive}>{m.action_join()}</button
+              >
+            </div>
           </div>
-          {#if competitive && matchmaking}<div class="mt-6 w-full">
+          {#if joinError}
+            <p class="join-error mt-2" role="alert" transition:slide={{ duration: 150 }}>
+              {joinError}
+            </p>
+          {/if}
+          {#if competitive && matchmaking}<div class="mt-4 w-full">
               {@render matchmaking(getLocale(), joinGame)}
             </div>{/if}
         </form>
