@@ -65,8 +65,12 @@
     plansUrl?: string;
     /** Shown at the bottom of the start menu only, for example a host's policy links. */
     menuFooter?: Snippet;
-    /** Open public games, shown on the start menu. Receives the current language. */
-    matchmaking?: Snippet<[string]>;
+    /** Open public games, shown on the Join screen. Receives the current language and a
+     * function that joins a game by its id or invitation. */
+    matchmaking?: Snippet<[string, (invitation: string) => void]>;
+    /** Shown inside the Join Game button, for example a count of open games. Receives the
+     * current language. */
+    joinBadge?: Snippet<[string]>;
   };
 
   let {
@@ -75,6 +79,7 @@
     plansUrl = "https://kuncat.com/subscriptions/",
     menuFooter,
     matchmaking,
+    joinBadge,
   }: AvoidantGameProps = $props();
   const authentication = $derived(accountClient ?? competitive?.account);
   let competitiveOpen = $state(false);
@@ -510,14 +515,13 @@
     }
   }
 
-  function joinGame() {
+  function joinGame(input = ticketInput.trim()) {
     joinError = undefined;
     if (!account || !competitive) {
       joinError = m.error_login_to_join();
       return;
     }
     try {
-      const input = ticketInput.trim();
       const id = parseInvitation(input);
       if (!id) throw new Error(m.error_invitation_invalid());
       invitation = id;
@@ -581,8 +585,8 @@
   <div
     class="panel-shell w-full"
     class:max-w-full={gameState}
-    class:max-w-xl={!gameState && (setupMode || (competitive && matchmaking))}
-    class:max-w-xs={!gameState && !setupMode && !(competitive && matchmaking)}
+    class:max-w-xl={!gameState && setupMode}
+    class:max-w-xs={!gameState && !setupMode}
     class:panel-card={!gameState}
     class:panel-header={gameState}
     class:py-6={!gameState && setupMode}
@@ -1280,6 +1284,9 @@
               >{m.action_join()}</button
             >
           </div>
+          {#if competitive && matchmaking}<div class="mt-6 w-full">
+              {@render matchmaking(getLocale(), joinGame)}
+            </div>{/if}
         </form>
       {:else}
         <div class="mt-4 flex flex-wrap justify-center gap-2" transition:slide={{ duration: 220 }}>
@@ -1292,7 +1299,9 @@
             disabled={!account || !competitive}
             onclick={() => (setupMode = "join")}
           >
-            {m.action_join_game()}
+            {m.action_join_game()}{#if competitive && joinBadge}{@render joinBadge(
+                getLocale(),
+              )}{/if}
           </button>
         </div>
         <div class="mt-4 flex justify-center" transition:slide={{ duration: 180 }}>
@@ -1313,9 +1322,6 @@
             {/each}
           </select>
         </div>
-        {#if competitive && matchmaking}<div class="mt-6 w-full">
-            {@render matchmaking(getLocale())}
-          </div>{/if}
         {#if menuFooter}<div class="mt-4">{@render menuFooter()}</div>{/if}
       {/if}
     {/if}

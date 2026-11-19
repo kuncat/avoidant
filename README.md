@@ -104,10 +104,12 @@ integration does not require a separate package edition.
 `AvoidantGame` accepts optional integration props: `competitive` supplies the
 multiplayer endpoint and account adapter, `accountClient` supports account access,
 `plansUrl` supplies the subscription destination, and `menuFooter` supplies footer
-content. The optional `matchmaking` snippet receives the current locale and is
-rendered on the menu when competitive play is configured. Embedders can supply
-their own open-game browser through this snippet. The standalone app currently
-supplies no matchmaking snippet.
+content. The optional `matchmaking` snippet is rendered on the Join screen when
+competitive play is configured. It receives the current locale and a function that
+joins a game by its id or invitation, so embedders can supply their own open-game
+browser. The optional `joinBadge` snippet is rendered inside the Join Game button,
+for example a count of open games, and receives the current locale. The standalone
+app currently supplies neither snippet.
 
 The npm archive contains the client `dist`, including generated WASM and translations.
 It does not contain or deploy the multiplayer Worker in `server/`. Hosting public
